@@ -48,11 +48,29 @@ check "which in project"          '[ "$(cd "$TMP/proj" && "$CC" which)" = "work"
 check "which walks up from deep"  '[ "$(cd "$TMP/proj/deep/nested" && "$CC" which)" = "work" ]'
 check "unbound dir exits nonzero" '! ( cd "$TMP/elsewhere" && "$CC" which --quiet >/dev/null 2>&1 )'
 
-echo "== marker content is untrusted input =="
-echo "../../../etc" >"$TMP/proj/.ccswitch"
-check "traversal in marker dies"  '! ( cd "$TMP/proj" && "$CC" which >/dev/null 2>&1 )'
+echo "== marker content is untrusted input, and a bad marker must FAIL CLOSED =="
+# Exit 2 (refuse) vs exit 1 (unbound, use default) is the load-bearing distinction: collapsing them
+# runs a client repo on the personal account silently.
+rc_of() { ( cd "$1" && "$CC" which >/dev/null 2>&1 ); echo $?; }
+for bad in "../../../etc" "" "-n" "--fix" "a b" "x;id" "/etc/passwd" ".." "client acme";
+do
+	printf '%s\n' "$bad" >"$TMP/proj/.ccswitch"
+	check "bad marker '$bad' exits 2 (refuse)" '[ "$(rc_of "$TMP/proj")" = "2" ]'
+done
+printf 'no-such-profile\n' >"$TMP/proj/.ccswitch"
+check "valid name, missing profile exits 2" '[ "$(rc_of "$TMP/proj")" = "2" ]'
+rm -f "$TMP/proj/.ccswitch"
+check "no marker at all exits 1"  '[ "$(rc_of "$TMP/proj")" = "1" ]'
 printf '  work  \n' >"$TMP/proj/.ccswitch"
 check "whitespace tolerated"      '[ "$(cd "$TMP/proj" && "$CC" which)" = "work" ]'
+printf 'work\r\n' >"$TMP/proj/.ccswitch"
+check "CRLF marker tolerated"     '[ "$(cd "$TMP/proj" && "$CC" which)" = "work" ]'
+printf 'work\nignored-second-line\n' >"$TMP/proj/.ccswitch"
+check "only first line is read"   '[ "$(cd "$TMP/proj" && "$CC" which)" = "work" ]'
+printf 'work' >"$TMP/proj/.ccswitch"
+check "no trailing newline is ok" '[ "$(cd "$TMP/proj" && "$CC" which)" = "work" ]'
+printf 'work\n' >"$TMP/proj/.ccswitch"
+check "bound dir exits 0"         '[ "$(rc_of "$TMP/proj")" = "0" ]'
 
 echo "== run exports the isolation contract =="
 got=$("$CC" run work sh -c 'echo "$CLAUDE_CONFIG_DIR|$CODEX_HOME|$CCSWITCH_PROFILE"')
@@ -73,12 +91,28 @@ cat >"$TMP/bin-claude" <<'EOF'
 echo "claude ran with CLAUDE_CONFIG_DIR=${CLAUDE_CONFIG_DIR:-none}"
 EOF
 chmod +x "$TMP/bin-claude"
-mkdir -p "$TMP/shim"; cp "$TMP/bin-claude" "$TMP/shim/claude"; cp "$TMP/bin-claude" "$TMP/shim/codex"
+mkdir -p "$TMP/shim" "$TMP/shim-noswitch"
+cp "$TMP/bin-claude" "$TMP/shim/claude"; cp "$TMP/bin-claude" "$TMP/shim/codex"
+cp "$TMP/bin-claude" "$TMP/shim-noswitch/claude"
 ln -sf "$CC" "$TMP/shim/ccswitch"
 out_bound=$(cd "$TMP/proj"      && PATH="$TMP/shim:$PATH" bash -c 'eval "$(ccswitch shell-init)"; claude')
 out_free=$(cd  "$TMP/elsewhere" && PATH="$TMP/shim:$PATH" bash -c 'eval "$(ccswitch shell-init)"; claude')
 check "bound dir gets profile"    '[ "$out_bound" = "claude ran with CLAUDE_CONFIG_DIR=$CCSWITCH_HOME/profiles/work/claude" ]'
 check "unbound dir passes through" '[ "$out_free" = "claude ran with CLAUDE_CONFIG_DIR=none" ]'
+
+# The wrapper must refuse rather than silently fall back to the default account.
+echo "../../etc" >"$TMP/proj/.ccswitch"
+out_bad=$(cd "$TMP/proj" && PATH="$TMP/shim:$PATH" bash -c 'eval "$(ccswitch shell-init)"; claude' 2>/dev/null)
+rc_bad=$(cd "$TMP/proj" && PATH="$TMP/shim:$PATH" bash -c 'eval "$(ccswitch shell-init)"; claude' >/dev/null 2>&1; echo $?)
+check "wrapper refuses bad marker" '[ "$rc_bad" = "2" ]'
+check "wrapper ran NOTHING on bad marker" '[ -z "$out_bad" ]'
+err_bad=$(cd "$TMP/proj" && PATH="$TMP/shim:$PATH" bash -c 'eval "$(ccswitch shell-init)"; claude' 2>&1 >/dev/null)
+check "wrapper explains why"      '[[ "$err_bad" == *"refusing to guess an account"* ]]'
+
+# ...but a missing/broken ccswitch must never block the real binary.
+out_noswitch=$(cd "$TMP/proj" && PATH="$TMP/shim-noswitch:$PATH" bash -c 'claude' 2>/dev/null)
+check "no ccswitch on PATH still runs claude" '[ "$out_noswitch" = "claude ran with CLAUDE_CONFIG_DIR=none" ]'
+printf 'work\n' >"$TMP/proj/.ccswitch"
 
 echo "== doctor detects an atomic write that clobbered a symlink =="
 # Capture before grepping: `cmd | grep -q` SIGPIPEs the writer, and pipefail scores that a failure.

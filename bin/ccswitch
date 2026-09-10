@@ -19,11 +19,12 @@ CODEX_SHARED=(config.toml)
 die()  { printf 'ccswitch: %s\n' "$*" >&2; exit 1; }
 warn() { printf 'ccswitch: %s\n' "$*" >&2; }
 
-# Profile names land in filesystem paths, so validate before use. Rejects empty, dot-leading
-# (blocks . and ..) and anything outside a conservative charset.
+# Profile names land in filesystem paths and in argv, so validate before use. Rejects empty,
+# dot-leading (blocks . and ..), dash-leading (would be read as an option) and anything outside a
+# conservative charset.
 valid_name() {
 	case "${1-}" in
-		'' | .* | *[!A-Za-z0-9._-]*) return 1 ;;
+		'' | [-.]* | *[!A-Za-z0-9._-]*) return 1 ;;
 		*) return 0 ;;
 	esac
 }
@@ -33,14 +34,27 @@ require_profile() {
 	[ -d "$PROFILES/$1" ] || die "no such profile: $1 (create it with: ccswitch add $1)"
 }
 
-# Walk up from a directory looking for the marker. Prints the profile name, or fails if unbound.
+# Walk up from a directory looking for the marker. Prints the profile name on stdout.
+# Exit 1 = no marker (use the default account). Exit 2 = marker present but unusable.
+# These MUST stay distinct: treating a corrupt marker as "unbound" silently runs a client's repo on
+# your personal account, which is the exact failure this tool exists to prevent. Fail closed.
 resolve() {
 	local dir name
 	dir=$(cd "${1:-$PWD}" 2>/dev/null && pwd -P) || return 1
 	while :; do
 		if [ -f "$dir/$MARKER" ]; then
-			name=$(tr -d '[:space:]' <"$dir/$MARKER")
-			valid_name "$name" || die "invalid profile name in $dir/$MARKER"
+			# Strips surrounding whitespace and CR (CRLF markers), keeps internal spaces so
+			# "a b" stays invalid instead of collapsing into the valid name "ab", and reads
+			# only the first line.
+			IFS=$' \t\r\n' read -r name <"$dir/$MARKER" || :
+			if ! valid_name "${name-}"; then
+				warn "$dir/$MARKER does not name a valid profile - refusing to guess an account"
+				return 2
+			fi
+			if [ ! -d "$PROFILES/$name" ]; then
+				warn "$dir/$MARKER names profile '$name', which does not exist - run: ccswitch add $name"
+				return 2
+			fi
 			printf '%s' "$name"
 			return 0
 		fi
@@ -124,13 +138,15 @@ cmd_unuse() {
 }
 
 cmd_which() {
-	local name
-	if name=$(resolve); then
+	local name rc=0
+	name=$(resolve) || rc=$?
+	if [ "$rc" -eq 0 ]; then
 		printf '%s\n' "$name"
-	else
-		[ "${1-}" = "--quiet" ] || echo "unbound (default account)"
-		return 1
+		return 0
 	fi
+	[ "$rc" -eq 2 ] && return 2
+	[ "${1-}" = "--quiet" ] || echo "unbound (default account)"
+	return 1
 }
 
 # Runs a command inside a profile. Every other entry point routes through here, so the env contract
@@ -195,13 +211,18 @@ cmd_doctor() {
 cmd_shell_init() {
 	cat <<'EOF'
 _ccswitch_exec() {
-	local tool=$1; shift
-	local profile
-	profile=$(command ccswitch which --quiet 2>/dev/null) || {
-		command "$tool" "$@"
-		return
-	}
-	command ccswitch run "$profile" "$tool" "$@"
+	local tool=$1 rc=0 profile
+	shift
+	profile=$(command ccswitch which --quiet 2>/dev/null) || rc=$?
+	if [ "$rc" -eq 2 ]; then
+		command ccswitch which --quiet >/dev/null   # re-run unmuted so the reason reaches stderr
+		return 2
+	fi
+	if [ -n "$profile" ]; then
+		command ccswitch run "$profile" "$tool" "$@"
+	else
+		command "$tool" "$@"   # unbound, or ccswitch missing/broken: never block the real binary
+	fi
 }
 claude() { _ccswitch_exec claude "$@"; }
 codex()  { _ccswitch_exec codex  "$@"; }
