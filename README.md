@@ -1,0 +1,68 @@
+# ccswitch
+
+Bind a Claude Code or Codex account to a directory. Client repo uses the client's account, work repo
+uses work's, personal uses mine. No logging out, no switching, and two accounts can be live in two
+terminals at the same time.
+
+## Install
+
+```bash
+git clone <this repo> ~/Projects/Personal/ccswitch
+export PATH="$HOME/Projects/Personal/ccswitch/bin:$PATH"   # in ~/.zshrc
+eval "$(ccswitch shell-init)"                              # in ~/.zshrc, after the PATH line
+```
+
+## Use
+
+```bash
+ccswitch add client-acme        # create a profile (shares your config, starts signed out)
+ccswitch login client-acme      # opens claude, run /login, exit
+cd ~/work/acme && ccswitch use client-acme
+
+claude                          # now runs as the acme account, here and in every subdirectory
+```
+
+Directories with no `.ccswitch` marker use your default account exactly as before. Nothing changes
+until you opt a directory in.
+
+| Command | |
+|---|---|
+| `ccswitch add <name>` | create a profile |
+| `ccswitch login <name> [claude\|codex]` | sign a profile in |
+| `ccswitch use <name>` / `unuse` | bind / unbind the current directory |
+| `ccswitch list` | profiles, their accounts, which is active here |
+| `ccswitch which` | the profile governing the current directory |
+| `ccswitch run <name> <cmd>...` | run anything inside a profile |
+| `ccswitch doctor [--fix]` | check that profiles still share config |
+
+## How it works
+
+Claude Code reads `CLAUDE_CONFIG_DIR` and Codex reads `CODEX_HOME`. Point them at different
+directories and you get fully separate credentials, with no shared slot to fight over. `ccswitch`
+walks up from `$PWD` for a `.ccswitch` file naming a profile, then launches the real binary with
+those variables set.
+
+Only auth is separated. `CLAUDE.md`, `settings.json`, `plugins`, `skills`, `agents` and `commands`
+are symlinked back to `~/.claude`, so every profile has your full setup and you maintain it once.
+
+## What this does not do
+
+**Switch a running session.** The variables are read at process launch, so a live session keeps the
+account it started with. Restart it.
+
+**Touch your credentials.** No token is read, written, or copied, and the keychain is never
+modified. That is the difference from every alternative below.
+
+## Why not the existing tools
+
+[CCSwitcher](https://github.com/XueshiQiao/CCSwitcher),
+[claude-account-switcher](https://github.com/Symbioose/claude-account-switcher) and
+[cc-account-switcher](https://github.com/ming86/cc-account-switcher) all overwrite the single
+`Claude Code-credentials` keychain entry and the `oauthAccount` block in `~/.claude.json`.
+
+That makes per-project impossible by construction. There is one slot, so there is one active
+account for the whole machine, and two terminals cannot hold two accounts. They also mutate
+credential storage, which is a bad place to have a bug. `cc-account-switcher` was archived in
+February 2026.
+
+They solve "which account am I on". This solves "which account does this project use".

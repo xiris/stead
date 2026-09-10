@@ -1,0 +1,249 @@
+#!/usr/bin/env bash
+# ccswitch - bind a Claude Code / Codex account to a directory.
+#
+# Credentials are isolated per profile via CLAUDE_CONFIG_DIR / CODEX_HOME (native, and the only
+# mechanism that lets two accounts be live in two terminals at once). Everything else - CLAUDE.md,
+# plugins, skills, settings - is symlinked back to the real home so profiles stay in sync.
+set -euo pipefail
+
+CCSWITCH_HOME="${CCSWITCH_HOME:-$HOME/.ccswitch}"
+PROFILES="$CCSWITCH_HOME/profiles"
+CLAUDE_HOME="${CCSWITCH_CLAUDE_HOME:-$HOME/.claude}"
+CODEX_REAL="${CCSWITCH_CODEX_HOME:-$HOME/.codex}"
+MARKER=".ccswitch"
+
+# Shared back to the real home. Auth state is deliberately absent: that is the whole point.
+CLAUDE_SHARED=(CLAUDE.md settings.json plugins skills agents commands)
+CODEX_SHARED=(config.toml)
+
+die()  { printf 'ccswitch: %s\n' "$*" >&2; exit 1; }
+warn() { printf 'ccswitch: %s\n' "$*" >&2; }
+
+# Profile names land in filesystem paths, so validate before use. Rejects empty, dot-leading
+# (blocks . and ..) and anything outside a conservative charset.
+valid_name() {
+	case "${1-}" in
+		'' | .* | *[!A-Za-z0-9._-]*) return 1 ;;
+		*) return 0 ;;
+	esac
+}
+
+require_profile() {
+	valid_name "$1" || die "invalid profile name: '$1' (use letters, digits, . _ -)"
+	[ -d "$PROFILES/$1" ] || die "no such profile: $1 (create it with: ccswitch add $1)"
+}
+
+# Walk up from a directory looking for the marker. Prints the profile name, or fails if unbound.
+resolve() {
+	local dir name
+	dir=$(cd "${1:-$PWD}" 2>/dev/null && pwd -P) || return 1
+	while :; do
+		if [ -f "$dir/$MARKER" ]; then
+			name=$(tr -d '[:space:]' <"$dir/$MARKER")
+			valid_name "$name" || die "invalid profile name in $dir/$MARKER"
+			printf '%s' "$name"
+			return 0
+		fi
+		[ "$dir" = "/" ] && return 1
+		dir=$(dirname "$dir")
+	done
+}
+
+# ln -sfn: -n keeps a directory symlink from being followed into on relink.
+link_one() {
+	local src=$1 dst=$2
+	[ -e "$src" ] || return 0
+	if [ -e "$dst" ] && [ ! -L "$dst" ]; then
+		warn "not linking $dst - a real file is already there (run 'ccswitch doctor' for details)"
+		return 0
+	fi
+	ln -sfn "$src" "$dst"
+}
+
+link_shared() {
+	local name=$1 f
+	for f in "${CLAUDE_SHARED[@]}"; do link_one "$CLAUDE_HOME/$f" "$PROFILES/$name/claude/$f"; done
+	for f in "${CODEX_SHARED[@]}"; do link_one "$CODEX_REAL/$f" "$PROFILES/$name/codex/$f"; done
+}
+
+# The account a claude profile is signed in as, or empty. Reads .claude.json, which is the file
+# Claude Code writes the resolved account into after login.
+claude_account() {
+	python3 -c 'import json,sys
+try:
+    print(json.load(open(sys.argv[1])).get("oauthAccount",{}).get("emailAddress","") or "")
+except Exception:
+    print("")' "$PROFILES/$1/claude/.claude.json" 2>/dev/null || true
+}
+
+cmd_add() {
+	local name=${1-}
+	valid_name "$name" || die "usage: ccswitch add <name>   (letters, digits, . _ -)"
+	[ -d "$PROFILES/$name" ] && die "profile '$name' already exists"
+	mkdir -p "$PROFILES/$name/claude" "$PROFILES/$name/codex"
+	link_shared "$name"
+	cat <<EOF
+Created profile '$name'. It shares your config and starts signed out.
+
+  ccswitch login $name          # sign in (opens claude, then run /login)
+  ccswitch login $name codex    # same for codex
+  ccswitch use $name            # bind the current directory to it
+EOF
+}
+
+cmd_list() {
+	local here name acct mark
+	here=$(resolve || true)
+	[ -d "$PROFILES" ] || { echo "No profiles yet. Create one with: ccswitch add <name>"; return 0; }
+	printf '%-16s %-34s %-7s %s\n' PROFILE CLAUDE CODEX ''
+	for name in $(ls -1 "$PROFILES" 2>/dev/null); do
+		acct=$(claude_account "$name")
+		mark=''
+		[ "$name" = "$here" ] && mark='<- active here'
+		printf '%-16s %-34s %-7s %s\n' \
+			"$name" "${acct:-signed out}" \
+			"$([ -f "$PROFILES/$name/codex/auth.json" ] && echo 'authed' || echo '-')" \
+			"$mark"
+	done
+	[ -z "$here" ] && printf '\n%s\n' "This directory is unbound - claude and codex use your default account."
+	return 0
+}
+
+cmd_use() {
+	local name=${1-}
+	require_profile "$name"
+	printf '%s\n' "$name" >"$PWD/$MARKER"
+	echo "Bound $PWD to profile '$name'. New claude/codex sessions here will use it."
+	echo "Existing sessions keep the account they launched with - restart them to switch."
+}
+
+cmd_unuse() {
+	[ -f "$PWD/$MARKER" ] || die "no $MARKER in $PWD"
+	rm "$PWD/$MARKER"
+	echo "Unbound $PWD - back to your default account."
+}
+
+cmd_which() {
+	local name
+	if name=$(resolve); then
+		printf '%s\n' "$name"
+	else
+		[ "${1-}" = "--quiet" ] || echo "unbound (default account)"
+		return 1
+	fi
+}
+
+# Runs a command inside a profile. Every other entry point routes through here, so the env contract
+# lives in exactly one place.
+cmd_run() {
+	local name=${1-}
+	require_profile "$name"
+	shift
+	[ $# -gt 0 ] || die "usage: ccswitch run <profile> <command> [args...]"
+	CLAUDE_CONFIG_DIR="$PROFILES/$name/claude" \
+	CODEX_HOME="$PROFILES/$name/codex" \
+	CCSWITCH_PROFILE="$name" \
+		exec "$@"
+}
+
+cmd_login() {
+	local name=${1-} tool=${2-claude}
+	require_profile "$name"
+	case "$tool" in
+		claude) echo "Starting claude in profile '$name'. Run /login, then exit." ;;
+		codex)  echo "Starting codex in profile '$name'. Sign in, then exit." ;;
+		*) die "unknown tool: $tool (expected 'claude' or 'codex')" ;;
+	esac
+	cmd_run "$name" "$tool"
+}
+
+# A symlink replaced by a real file is the known failure mode: an atomic write (temp file + rename)
+# clobbers the link and silently unshares that config. Cheap to detect, cheap to repair.
+cmd_doctor() {
+	local name f dst src broken=0
+	[ -d "$PROFILES" ] || { echo "No profiles yet."; return 0; }
+	for name in $(ls -1 "$PROFILES" 2>/dev/null); do
+		for f in "${CLAUDE_SHARED[@]}"; do
+			src="$CLAUDE_HOME/$f"; dst="$PROFILES/$name/claude/$f"
+			[ -e "$src" ] || continue
+			if [ ! -L "$dst" ]; then
+				broken=$((broken + 1))
+				printf '%s: %s is %s\n' "$name" "$f" \
+					"$([ -e "$dst" ] && echo 'a real file (no longer shared)' || echo 'missing')"
+			fi
+		done
+	done
+	if [ "$broken" -eq 0 ]; then
+		echo "All profiles share config correctly."
+		return 0
+	fi
+	printf '\n%s\n' "$broken link(s) not shared. Re-link with: ccswitch doctor --fix"
+	if [ "${1-}" = "--fix" ]; then
+		for name in $(ls -1 "$PROFILES" 2>/dev/null); do
+			for f in "${CLAUDE_SHARED[@]}"; do
+				dst="$PROFILES/$name/claude/$f"
+				[ -L "$dst" ] || rm -rf "$dst"
+			done
+			link_shared "$name"
+		done
+		echo "Re-linked. Anything that was overwritten in a profile is gone; the shared copy wins."
+	fi
+	return 0
+}
+
+# Emitted for eval in a shell rc. Keeps resolution in this script so there is one implementation.
+cmd_shell_init() {
+	cat <<'EOF'
+_ccswitch_exec() {
+	local tool=$1; shift
+	local profile
+	profile=$(command ccswitch which --quiet 2>/dev/null) || {
+		command "$tool" "$@"
+		return
+	}
+	command ccswitch run "$profile" "$tool" "$@"
+}
+claude() { _ccswitch_exec claude "$@"; }
+codex()  { _ccswitch_exec codex  "$@"; }
+EOF
+}
+
+usage() {
+	cat <<'EOF'
+ccswitch - bind a Claude Code / Codex account to a directory
+
+  ccswitch add <name>              create a profile (shares your config, starts signed out)
+  ccswitch login <name> [claude|codex]
+                                   sign a profile in
+  ccswitch use <name>              bind the current directory (writes .ccswitch)
+  ccswitch unuse                   unbind the current directory
+  ccswitch list                    profiles, their accounts, and which is active here
+  ccswitch which                   the profile governing the current directory
+  ccswitch run <name> <cmd>...     run any command inside a profile
+  ccswitch doctor [--fix]          check that profiles still share config
+
+Shell integration (zsh/bash) - makes `claude` and `codex` follow the directory:
+
+  eval "$(ccswitch shell-init)"
+EOF
+}
+
+main() {
+	local cmd=${1-}
+	[ $# -gt 0 ] && shift
+	case "$cmd" in
+		add) cmd_add "$@" ;;
+		login) cmd_login "$@" ;;
+		use) cmd_use "$@" ;;
+		unuse) cmd_unuse "$@" ;;
+		list | ls) cmd_list "$@" ;;
+		which) cmd_which "$@" ;;
+		run) cmd_run "$@" ;;
+		doctor) cmd_doctor "$@" ;;
+		shell-init) cmd_shell_init "$@" ;;
+		'' | -h | --help | help) usage ;;
+		*) usage >&2; die "unknown command: $cmd" ;;
+	esac
+}
+
+main "$@"
