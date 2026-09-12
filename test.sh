@@ -250,7 +250,7 @@ rm -rf "$STEAD_CLAUDE_HOME/sessions"
 "$CC" add ondemand >/dev/null 2>&1
 check "source dir created"         '[ -d "$STEAD_CLAUDE_HOME/sessions" ]'
 check "sessions linked anyway"     '[ -L "$STEAD_HOME/profiles/ondemand/claude/sessions" ]'
-check "source dir is private"      '[ "$(stat -f %Sp "$STEAD_CLAUDE_HOME/sessions")" = "drwx------" ]'
+check "source dir is private"      '[ "$(ls -ld "$STEAD_CLAUDE_HOME/sessions" | cut -c1-10)" = "drwx------" ]'
 rm -rf "$STEAD_HOME/profiles/ondemand"
 
 echo "== a tab or newline in a home path is refused at startup =="

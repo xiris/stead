@@ -88,6 +88,10 @@ keeps the account it started with. Restart it.
 **Touch your credential store.** Nothing reads or writes `.credentials.json`, and the keychain is
 never modified.
 
+**Claim to be tested anywhere but macOS.** Nothing here touches the keychain, and the suite passes
+on Linux in CI, so it should work there. I run it on macOS only, so Linux is tested rather than
+used.
+
 **Work outside an interactive shell.** The wrapper is a shell function from your `~/.zshrc`. A
 `claude` launched by an IDE extension or a cron job may not get it, and would run on your default
 account. Check with `whence -w claude`, which should say `function`.
