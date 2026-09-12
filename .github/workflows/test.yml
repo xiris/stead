@@ -1,0 +1,28 @@
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Syntax
+        run: bash -n bin/stead && bash -n test.sh
+
+      # macOS ships bash 3.2, so that is the version the tool has to run on.
+      # The homebrew bash that `bash` resolves to would hide a 3.2-only break.
+      - name: Suite on bash 3.2
+        run: /bin/bash ./test.sh
+
+      - name: Suite on the runner default bash
+        run: ./test.sh
+
+      - name: Shellcheck
+        run: |
+          brew install shellcheck
+          shellcheck bin/stead test.sh

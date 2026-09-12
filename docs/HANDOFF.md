@@ -9,7 +9,7 @@ Working branch `fix/list-fail-closed` was ff-merged and deleted.
 ## Green
 
 ```
-bash -n bin/ccswitch && bash -n test.sh     syntax ok
+bash -n bin/stead && bash -n test.sh     syntax ok
 ./test.sh                                   85 passed, 0 failed
 /bin/bash ./test.sh                         85 passed, 0 failed  (bash 3.2.57)
 ```
@@ -40,13 +40,13 @@ Five defects, all of the same shape: a rule enforced in one code path and missed
 - A `claude` run inside a profile leaves `~/.claude.json` byte-identical (mtime and size).
 - Profile `personal` is signed in as chris@planner.net.br and answers prompts.
 - `~/Projects/Personal/docX` is bound to `personal`; the marker is gitignored there.
-- `~/.zshrc` has the PATH line and `eval "$(ccswitch shell-init)"`. Backup at `~/.zshrc.bak.ccswitch`.
+- `~/.zshrc` has the PATH line and `eval "$(stead shell-init)"`. Backup at `~/.zshrc.bak.stead`.
 
 ## Still open
 
-- **`ccswitch login personal codex`** was never run. The CODEX column in `list` reads `-`.
-- **`docX` has an uncommitted ` M .gitignore`** - the one line that ignores `.ccswitch`.
-- **`ccswitch sync-mcp <profile>`** is the obvious next feature. MCP servers ride in `.claude.json`
+- **`stead login personal codex`** was never run. The CODEX column in `list` reads `-`.
+- **`docX` has an uncommitted ` M .gitignore`** - the one line that ignores `.stead`.
+- **`stead sync-mcp <profile>`** is the obvious next feature. MCP servers ride in `.claude.json`
   with the account so they cannot be symlinked, but the `mcpServers` block itself holds no
   credentials, so copying just that key is safe. Refuse entries with a non-empty `env` or
   `headers`. The two servers were copied into `personal` by hand this session.
@@ -59,5 +59,5 @@ Nothing. All five review findings that were deferred mid-session were closed bef
 
 ## Read first on resume
 
-`CLAUDE.md` (the four architecture facts), then `bin/ccswitch:37-64` (`resolve`, and why exit 1 and
+`CLAUDE.md` (the four architecture facts), then `bin/stead:37-64` (`resolve`, and why exit 1 and
 exit 2 must stay distinct - three of the five defects above were that distinction collapsing).

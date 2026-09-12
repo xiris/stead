@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
-# ccswitch - bind a Claude Code / Codex account to a directory.
+# stead - bind a Claude Code / Codex account to a directory.
 #
 # Credentials are isolated per profile via CLAUDE_CONFIG_DIR / CODEX_HOME (native, and the only
 # mechanism that lets two accounts be live in two terminals at once). Everything else - CLAUDE.md,
 # plugins, skills, settings - is symlinked back to the real home so profiles stay in sync.
 set -euo pipefail
 
-CCSWITCH_HOME="${CCSWITCH_HOME:-$HOME/.ccswitch}"
-PROFILES="$CCSWITCH_HOME/profiles"
-CLAUDE_HOME="${CCSWITCH_CLAUDE_HOME:-$HOME/.claude}"
-CODEX_REAL="${CCSWITCH_CODEX_HOME:-$HOME/.codex}"
+STEAD_HOME="${STEAD_HOME:-$HOME/.stead}"
+PROFILES="$STEAD_HOME/profiles"
+CLAUDE_HOME="${STEAD_CLAUDE_HOME:-$HOME/.claude}"
+CODEX_REAL="${STEAD_CODEX_HOME:-$HOME/.codex}"
 # Sibling of $CLAUDE_HOME, not inside it: Claude Code keeps .claude.json next to ~/.claude.
-CLAUDE_JSON="${CCSWITCH_CLAUDE_JSON:-$HOME/.claude.json}"
-MARKER=".ccswitch"
+CLAUDE_JSON="${STEAD_CLAUDE_JSON:-$HOME/.claude.json}"
+MARKER=".stead"
 
 # Shared back to the real home. Auth state is deliberately absent: that is the whole point.
 # hooks: the DEFINITIONS live in settings.json, but the scripts they name live here. They happen to
@@ -30,31 +30,31 @@ CLAUDE_SHARED=(CLAUDE.md settings.json settings.local.json plugins skills agents
 CODEX_SHARED=(config.toml plugins skills)
 # Claude Code creates these on demand, so an absent source means "not used yet", not "the user does
 # not want it shared" - unlike agents/ or commands/, which exist only if the user made them. Without
-# creating it, someone who only ever runs claude through ccswitch never has ~/.claude/sessions, so
+# creating it, someone who only ever runs claude through stead never has ~/.claude/sessions, so
 # each_shared filters the entry out, every profile keeps its own real registry, sessions stay
 # mutually invisible, and doctor reports healthy forever.
 CLAUDE_ONDEMAND=(sessions)
 
-die()  { printf 'ccswitch: %s\n' "$*" >&2; exit 1; }
-warn() { printf 'ccswitch: %s\n' "$*" >&2; }
+die()  { printf 'stead: %s\n' "$*" >&2; exit 1; }
+warn() { printf 'stead: %s\n' "$*" >&2; }
 
 # each_shared encodes paths into tab-separated fields, so a tab or newline in any of these roots
 # splits one entry into two and hands a consumer a path it never built. That consumer includes a
 # `rm -rf` loop, and the mis-parsed path is RELATIVE, so it resolves against the user's cwd - a
 # delete outside $PROFILES entirely. Refuse at startup instead: this is a trust boundary, same as
-# valid_name. Guards CCSWITCH_HOME too, which is safe today only because dst happens to be the last
+# valid_name. Guards STEAD_HOME too, which is safe today only because dst happens to be the last
 # field; that is not a property worth making load-bearing.
 # shell-init is exempt: it prints a static heredoc and touches no path. If it died here the
 # wrapper functions would never be DEFINED, and every directory in that shell - bound ones
 # included - would silently run the default account. Letting it through means the functions exist
-# and refuse properly at `ccswitch which` time, with exit 2.
+# and refuse properly at `stead which` time, with exit 2.
 case "${1-}" in shell-init) ;; *)
-case "$CCSWITCH_HOME$CLAUDE_HOME$CODEX_REAL" in
+case "$STEAD_HOME$CLAUDE_HOME$CODEX_REAL" in
 	*$'\t'* | *$'\n'*)
-		# Exit 2, NOT die's 1. _ccswitch_exec reads 1 as "unbound, run the real binary", so
+		# Exit 2, NOT die's 1. _stead_exec reads 1 as "unbound, run the real binary", so
 		# dying here would launch a bound client repo on the default account - the very
 		# outcome resolve() fails closed to avoid. 2 is the wrapper's "refuse" code.
-		warn "a tab or newline in a ccswitch home path is not supported (CCSWITCH_HOME / CLAUDE_HOME / CODEX_HOME)"
+		warn "a tab or newline in a stead home path is not supported (STEAD_HOME / CLAUDE_HOME / CODEX_HOME)"
 		exit 2
 		;;
 esac
@@ -72,7 +72,7 @@ valid_name() {
 
 require_profile() {
 	valid_name "$1" || die "invalid profile name: '$1' (use letters, digits, . _ -)"
-	[ -d "$PROFILES/$1" ] || die "no such profile: $1 (create it with: ccswitch add $1)"
+	[ -d "$PROFILES/$1" ] || die "no such profile: $1 (create it with: stead add $1)"
 }
 
 # Walk up from a directory looking for the marker. Prints the profile name on stdout.
@@ -93,7 +93,7 @@ resolve() {
 				return 2
 			fi
 			if [ ! -d "$PROFILES/$name" ]; then
-				warn "$dir/$MARKER names profile '$name', which does not exist - run: ccswitch add $name"
+				warn "$dir/$MARKER names profile '$name', which does not exist - run: stead add $name"
 				return 2
 			fi
 			printf '%s' "$name"
@@ -126,7 +126,7 @@ link_one() {
 	[ -e "$src" ] || return 0
 	mkdir -p "${dst%/*}" 2>/dev/null || return 0   # recreate a profile's missing claude/ or codex/ half
 	if [ -e "$dst" ] && [ ! -L "$dst" ]; then
-		warn "not linking $dst - a real file is already there (run 'ccswitch doctor' for details)"
+		warn "not linking $dst - a real file is already there (run 'stead doctor' for details)"
 		return 0
 	fi
 	ln -sfn "$src" "$dst"
@@ -280,7 +280,7 @@ if mode == "audit":
 try:
     servers = json.load(open(src_p)).get("mcpServers", {})
 except Exception:
-    sys.stderr.write("ccswitch: no readable %s - skipping mcp sync\n" % src_p)
+    sys.stderr.write("stead: no readable %s - skipping mcp sync\n" % src_p)
     sys.exit(0)
 if not isinstance(servers, dict) or not servers:
     print("No user-scoped MCP servers to copy.")
@@ -293,15 +293,15 @@ try:
 except FileNotFoundError:
     dst = {}
 except Exception:
-    sys.stderr.write("ccswitch: %s exists but is not readable JSON - refusing to overwrite it\n" % dst_p)
+    sys.stderr.write("stead: %s exists but is not readable JSON - refusing to overwrite it\n" % dst_p)
     sys.exit(0)
 if not isinstance(dst, dict):
-    sys.stderr.write("ccswitch: %s is not a JSON object - refusing to overwrite it\n" % dst_p)
+    sys.stderr.write("stead: %s is not a JSON object - refusing to overwrite it\n" % dst_p)
     sys.exit(0)
 
 cur = dst.get("mcpServers", {})
 if not isinstance(cur, dict):
-    sys.stderr.write("ccswitch: mcpServers in %s is not an object - refusing to touch it\n" % dst_p)
+    sys.stderr.write("stead: mcpServers in %s is not an object - refusing to touch it\n" % dst_p)
     sys.exit(0)
 
 copied, kept, refused = [], [], []
@@ -346,24 +346,24 @@ cmd_sync_mcp() {
 
 cmd_add() {
 	local name=${1-}
-	valid_name "$name" || die "usage: ccswitch add <name>   (letters, digits, . _ -)"
+	valid_name "$name" || die "usage: stead add <name>   (letters, digits, . _ -)"
 	[ -d "$PROFILES/$name" ] && die "profile '$name' already exists"
 	mkdir -p "$PROFILES/$name/claude" "$PROFILES/$name/codex"
 	link_shared "$name"
-	cmd_sync_mcp "$name" || warn "mcp sync failed - profile created, run 'ccswitch sync-mcp $name' later"
+	cmd_sync_mcp "$name" || warn "mcp sync failed - profile created, run 'stead sync-mcp $name' later"
 	cat <<EOF
 Created profile '$name'. It shares your config and starts signed out.
 
-  ccswitch login $name          # sign in (opens claude, then run /login)
-  ccswitch login $name codex    # same for codex
-  ccswitch use $name            # bind the current directory to it
+  stead login $name          # sign in (opens claude, then run /login)
+  stead login $name codex    # same for codex
+  stead use $name            # bind the current directory to it
 EOF
 }
 
 cmd_list() {
 	local here name acct mark rc=0
 	here=$(resolve) || rc=$?
-	[ -d "$PROFILES" ] || { echo "No profiles yet. Create one with: ccswitch add <name>"; return 0; }
+	[ -d "$PROFILES" ] || { echo "No profiles yet. Create one with: stead add <name>"; return 0; }
 	printf '%-16s %-34s %-7s %s\n' PROFILE CLAUDE CODEX ''
 	while IFS= read -r name; do
 		acct=$(claude_account "$name")
@@ -417,7 +417,7 @@ cmd_run() {
 	local name=${1-}
 	require_profile "$name"
 	shift
-	[ $# -gt 0 ] || die "usage: ccswitch run <profile> <command> [args...]"
+	[ $# -gt 0 ] || die "usage: stead run <profile> <command> [args...]"
 	# A session registers itself into the SHARED peer registry at startup, and its default name is
 	# derived from the directory - so a client repo publishes its own name to every other profile
 	# before anyone can rename it, and /title is a cure rather than a prevention. Bound directories
@@ -431,7 +431,7 @@ cmd_run() {
 	CLAUDE_CONFIG_DIR="$PROFILES/$name/claude" \
 	CODEX_HOME="$PROFILES/$name/codex" \
 	CLAUDE_CODE_SESSION_NAME="$alias" \
-	CCSWITCH_PROFILE="$name" \
+	STEAD_PROFILE="$name" \
 		exec "$@"
 }
 
@@ -472,12 +472,12 @@ cmd_doctor() {
 	# Deliberately NOT folded into --fix: relinking cannot fix these, and a --fix that printed
 	# success over them would be the fabricated-repair bug this file already fixed once.
 	if [ "$flagged" -gt 0 ]; then
-		printf '\n%s\n' "$flagged mcp server(s) above would not pass the current copy guard. Remove and re-add them inside the profile: ccswitch run <profile> claude mcp add ..."
+		printf '\n%s\n' "$flagged mcp server(s) above would not pass the current copy guard. Remove and re-add them inside the profile: stead run <profile> claude mcp add ..."
 	fi
 	if [ "$broken" -eq 0 ]; then
 		return 0
 	fi
-	printf '\n%s\n' "$broken link(s) not shared. Re-link with: ccswitch doctor --fix"
+	printf '\n%s\n' "$broken link(s) not shared. Re-link with: stead doctor --fix"
 	if [ "${1-}" = "--fix" ]; then
 		while IFS= read -r name; do
 			while IFS=$'\t' read -r label src dst; do
@@ -498,43 +498,43 @@ cmd_doctor() {
 # Emitted for eval in a shell rc. Keeps resolution in this script so there is one implementation.
 cmd_shell_init() {
 	cat <<'EOF'
-_ccswitch_exec() {
+_stead_exec() {
 	local tool=$1 rc=0 profile
 	shift
-	profile=$(command ccswitch which --quiet 2>/dev/null) || rc=$?
+	profile=$(command stead which --quiet 2>/dev/null) || rc=$?
 	if [ "$rc" -eq 2 ]; then
-		command ccswitch which --quiet >/dev/null   # re-run unmuted so the reason reaches stderr
+		command stead which --quiet >/dev/null   # re-run unmuted so the reason reaches stderr
 		return 2
 	fi
 	if [ -n "$profile" ]; then
-		command ccswitch run "$profile" "$tool" "$@"
+		command stead run "$profile" "$tool" "$@"
 	else
-		command "$tool" "$@"   # unbound, or ccswitch missing/broken: never block the real binary
+		command "$tool" "$@"   # unbound, or stead missing/broken: never block the real binary
 	fi
 }
-claude() { _ccswitch_exec claude "$@"; }
-codex()  { _ccswitch_exec codex  "$@"; }
+claude() { _stead_exec claude "$@"; }
+codex()  { _stead_exec codex  "$@"; }
 EOF
 }
 
 usage() {
 	cat <<'EOF'
-ccswitch - bind a Claude Code / Codex account to a directory
+stead - bind a Claude Code / Codex account to a directory
 
-  ccswitch add <name>              create a profile (shares your config, starts signed out)
-  ccswitch login <name> [claude|codex]
+  stead add <name>              create a profile (shares your config, starts signed out)
+  stead login <name> [claude|codex]
                                    sign a profile in
-  ccswitch use <name>              bind the current directory (writes .ccswitch)
-  ccswitch unuse                   unbind the current directory
-  ccswitch list                    profiles, their accounts, and which is active here
-  ccswitch which                   the profile governing the current directory
-  ccswitch run <name> <cmd>...     run any command inside a profile
-  ccswitch doctor [--fix]          check that profiles still share config
-  ccswitch sync-mcp <name>         copy your MCP servers into a profile (allowlisted fields only)
+  stead use <name>              bind the current directory (writes .stead)
+  stead unuse                   unbind the current directory
+  stead list                    profiles, their accounts, and which is active here
+  stead which                   the profile governing the current directory
+  stead run <name> <cmd>...     run any command inside a profile
+  stead doctor [--fix]          check that profiles still share config
+  stead sync-mcp <name>         copy your MCP servers into a profile (allowlisted fields only)
 
 Shell integration (zsh/bash) - makes `claude` and `codex` follow the directory:
 
-  eval "$(ccswitch shell-init)"
+  eval "$(stead shell-init)"
 EOF
 }
 

@@ -1,4 +1,4 @@
-# ccswitch
+# stead
 
 Binds a Claude Code / Codex account to a directory, so a client repo uses the client account and a
 personal repo uses mine, with no switching and no logging out.
@@ -9,7 +9,7 @@ personal repo uses mine, with no switching and no logging out.
 ## Stack
 
 - **Runtime:** bash 3.2 (macOS system bash - no bash 4 syntax, no `declare -A`, no `${x^^}`)
-- **Package manager:** none. One executable, `bin/ccswitch`. Adding a dependency needs a reason.
+- **Package manager:** none. One executable, `bin/stead`. Adding a dependency needs a reason.
 - **Tests:** `./test.sh` - plain bash, runs in a temp dir, no framework
 - **Lint:** `bash -n` always; `shellcheck` if installed (it currently is not)
 
@@ -18,9 +18,9 @@ The stack's `standards/biome.json` does **not** apply here. It's a shell project
 ## Green
 
 ```bash
-bash -n bin/ccswitch && bash -n test.sh   # syntax
+bash -n bin/stead && bash -n test.sh   # syntax
 ./test.sh                                 # 143 assertions, must print "0 failed"
-shellcheck bin/ccswitch test.sh           # optional - not installed on this machine
+shellcheck bin/stead test.sh           # optional - not installed on this machine
 ```
 
 **Known environment failures:** none. `test.sh` touches nothing outside its `mktemp -d`.
@@ -41,9 +41,9 @@ Four facts carry the whole design. Violating any of them breaks the premise.
   route through it. Add a new entry point by calling it, never by exporting the vars again.
 - **Auth is isolated; everything else is symlinked back to `~/.claude`.** Config lives in one place
   and profiles see it. The failure mode is an atomic write (temp + rename) replacing a symlink with
-  a real file, silently unsharing it - that is exactly what `ccswitch doctor` looks for.
+  a real file, silently unsharing it - that is exactly what `stead doctor` looks for.
 - **Profile names become filesystem paths.** `valid_name` is a trust boundary, and so is the
-  content of a `.ccswitch` marker, which is an attacker-writable file in a cloned repo. Both are
+  content of a `.stead` marker, which is an attacker-writable file in a cloned repo. Both are
   validated. Do not add a code path that skips it.
 
 ## Docs that matter
@@ -57,8 +57,8 @@ Four facts carry the whole design. Violating any of them breaks the premise.
   did not exist. Capture to a variable, then match with `[[ $var == *pat* ]]`.
 - **Switching needs a restart.** Env is fixed at process launch, so a running session keeps the
   account it started with. Inherent to the mechanism, not a bug to fix.
-- **`.ccswitch` names a profile, so it can leak a client's name.** Gitignore it in shared repos.
+- **`.stead` names a profile, so it can leak a client's name.** Gitignore it in shared repos.
 
 ## Deploy
 
-None. `bin/ccswitch` goes on `PATH`; `eval "$(ccswitch shell-init)"` goes in `~/.zshrc`.
+None. `bin/stead` goes on `PATH`; `eval "$(stead shell-init)"` goes in `~/.zshrc`.
