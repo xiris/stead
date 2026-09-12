@@ -28,6 +28,12 @@ MARKER=".ccswitch"
 # name sessions neutrally, because a derived name is the directory name.
 CLAUDE_SHARED=(CLAUDE.md settings.json settings.local.json plugins skills agents commands hooks sessions)
 CODEX_SHARED=(config.toml plugins skills)
+# Claude Code creates these on demand, so an absent source means "not used yet", not "the user does
+# not want it shared" - unlike agents/ or commands/, which exist only if the user made them. Without
+# creating it, someone who only ever runs claude through ccswitch never has ~/.claude/sessions, so
+# each_shared filters the entry out, every profile keeps its own real registry, sessions stay
+# mutually invisible, and doctor reports healthy forever.
+CLAUDE_ONDEMAND=(sessions)
 
 die()  { printf 'ccswitch: %s\n' "$*" >&2; exit 1; }
 warn() { printf 'ccswitch: %s\n' "$*" >&2; }
@@ -145,8 +151,30 @@ each_shared() {
 	return 0
 }
 
+# A real DIRECTORY in a profile can hold state that exists nowhere else. The session registry is the
+# case that forced this: rm -rf there deregisters a LIVE session and destroys its IPC key, which
+# Claude Code writes only at startup and never recreates - and doctor's own printed remedy is what
+# would do it. Move the contents into the shared copy instead, shared winning any collision, then
+# let the caller link. A real FILE is still replaced: that is the atomic-write clobber doctor exists
+# to repair, and there the shared copy really is authoritative.
+merge_into_shared() {
+	local src=$1 dst=$2 f b
+	[ -d "$dst" ] && [ ! -L "$dst" ] || return 0
+	mkdir -p "$src"
+	for f in "$dst"/* "$dst"/.[!.]*; do
+		[ -e "$f" ] || continue          # no match: the glob stays literal
+		b=${f##*/}
+		[ -e "$src/$b" ] && continue     # already in the shared copy, which wins
+		mv "$f" "$src/$b"
+	done
+	rmdir "$dst" 2>/dev/null || true
+}
+
 link_shared() {
-	local label src dst
+	local label src dst f
+	for f in "${CLAUDE_ONDEMAND[@]}"; do
+		[ -e "$CLAUDE_HOME/$f" ] || mkdir -p -m 700 "$CLAUDE_HOME/$f"
+	done
 	# Process substitution, not a pipe: a piped `while` runs in a subshell and loses what it sets.
 	while IFS=$'\t' read -r label src dst; do link_one "$src" "$dst"; done < <(each_shared "$1")
 }
@@ -453,11 +481,16 @@ cmd_doctor() {
 	if [ "${1-}" = "--fix" ]; then
 		while IFS= read -r name; do
 			while IFS=$'\t' read -r label src dst; do
-				[ -L "$dst" ] || rm -rf "$dst"
+				if [ ! -L "$dst" ]; then
+					merge_into_shared "$src" "$dst"
+					[ -e "$dst" ] && rm -rf "$dst"
+				fi
+				:
 			done < <(each_shared "$name")
 			link_shared "$name"
 		done < <(profile_names)
-		echo "Re-linked. Anything that was overwritten in a profile is gone; the shared copy wins."
+			echo "Re-linked. A profile directory was merged into the shared copy, which wins a collision;"
+		echo "a profile FILE that had replaced a shared one is gone."
 	fi
 	return 0
 }

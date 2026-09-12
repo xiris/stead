@@ -217,6 +217,38 @@ echo ".ccswitch" >"$TMP/proj/.gitignore"
 out=$(cd "$TMP/proj" && "$CC" use work)
 check "silent when ignored"       '[[ "$out" != *"not gitignored"* ]]'
 
+echo "== doctor --fix must migrate a profile directory, not delete it ==" 
+# sessions is the first shared entry holding LIVE runtime state. rm -rf there deregisters a running
+# session and destroys an IPC key Claude Code writes only at startup - and doctor PRINTS --fix as
+# the remedy, so the tool would be instructing the user to break their own sessions.
+rm -rf "$CCSWITCH_HOME/profiles/work/claude/sessions"
+mkdir -p "$CCSWITCH_HOME/profiles/work/claude/sessions"
+echo '{"pid":99999}' >"$CCSWITCH_HOME/profiles/work/claude/sessions/99999.json"
+echo 'secret-ipc-key' >"$CCSWITCH_HOME/profiles/work/claude/sessions/99999.aaaa.key"
+echo 'shared-wins' >"$CCSWITCH_CLAUDE_HOME/sessions/collide.json"
+echo 'profile-loses' >"$CCSWITCH_HOME/profiles/work/claude/sessions/collide.json"
+"$CC" doctor --fix >/dev/null 2>&1 || true
+check "live record survived --fix"  '[ -f "$CCSWITCH_CLAUDE_HOME/sessions/99999.json" ]'
+check "ipc key survived --fix"      '[ -f "$CCSWITCH_CLAUDE_HOME/sessions/99999.aaaa.key" ]'
+check "sessions relinked after"     '[ -L "$CCSWITCH_HOME/profiles/work/claude/sessions" ]'
+check "shared copy wins collision"  '[ "$(cat "$CCSWITCH_CLAUDE_HOME/sessions/collide.json")" = "shared-wins" ]'
+rm -f "$CCSWITCH_CLAUDE_HOME/sessions/99999.json" "$CCSWITCH_CLAUDE_HOME/sessions/99999.aaaa.key" "$CCSWITCH_CLAUDE_HOME/sessions/collide.json"
+# A real FILE replacing a shared one is still discarded: that is the clobber doctor exists to fix.
+rm -f "$CCSWITCH_HOME/profiles/work/claude/settings.json"
+echo '{"clobbered":9}' >"$CCSWITCH_HOME/profiles/work/claude/settings.json"
+"$CC" doctor --fix >/dev/null 2>&1 || true
+check "clobbered file still wins shared" '[ "$(cat "$CCSWITCH_HOME/profiles/work/claude/settings.json")" = "{\"a\":1}" ]'
+
+echo "== an on-demand source is created, not silently skipped =="
+# If ~/.claude/sessions does not exist, each_shared filters the entry out, every profile keeps its
+# own registry, peers stay invisible - and doctor calls it healthy forever.
+rm -rf "$CCSWITCH_CLAUDE_HOME/sessions"
+"$CC" add ondemand >/dev/null 2>&1
+check "source dir created"         '[ -d "$CCSWITCH_CLAUDE_HOME/sessions" ]'
+check "sessions linked anyway"     '[ -L "$CCSWITCH_HOME/profiles/ondemand/claude/sessions" ]'
+check "source dir is private"      '[ "$(stat -f %Sp "$CCSWITCH_CLAUDE_HOME/sessions")" = "drwx------" ]'
+rm -rf "$CCSWITCH_HOME/profiles/ondemand"
+
 echo "== a tab or newline in a home path is refused at startup =="
 # The tab-separated encoding would split one entry in two and hand the rm -rf loop a RELATIVE dst,
 # which resolves against the user's cwd - a delete outside $PROFILES entirely. Fail closed instead.
