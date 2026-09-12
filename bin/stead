@@ -76,13 +76,15 @@ require_profile() {
 	[ -d "$PROFILES/$1" ] || die "no such profile: $1 (create it with: stead add $1)"
 }
 
-# Walk up from a directory looking for the marker. Prints the profile name on stdout.
+# Walk up from the working directory looking for the marker. Prints the profile name on stdout.
 # Exit 1 = no marker (use the default account). Exit 2 = marker present but unusable.
 # These MUST stay distinct: treating a corrupt marker as "unbound" silently runs a client's repo on
 # your personal account, which is the exact failure this tool exists to prevent. Fail closed.
 resolve() {
 	local dir name
-	dir=$(cd "${1:-$PWD}" 2>/dev/null && pwd -P) || return 1
+	# -P so a symlinked path walks its real parents. It took an optional directory argument once,
+	# and nothing ever passed one.
+	dir=$(pwd -P) || return 1
 	while :; do
 		if [ -f "$dir/$MARKER" ]; then
 			# Strips surrounding whitespace and CR (CRLF markers), keeps internal spaces so
