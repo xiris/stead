@@ -46,6 +46,12 @@ Only auth is separated. `CLAUDE.md`, `settings.json`, `settings.local.json`, `pl
 `agents`, `commands` and `hooks` are symlinked back to `~/.claude`, so every profile has your full
 setup and you maintain it once. On the Codex side it is `config.toml`, `plugins` and `skills`.
 
+Sharing cuts both ways on one file. `settings.local.json` is what Claude Code writes when you pick
+"don't ask again", so a permission you approve under the client account is approved under your
+personal one too, and the reverse. That is the intended trade - unshared, every profile re-prompts
+for everything you have already allowed. If you want approvals isolated per client, drop
+`settings.local.json` from `CLAUDE_SHARED` in `bin/ccswitch`.
+
 One thing cannot be shared: **user-scoped MCP servers**. They live in `.claude.json`, the same file
 that holds the account, so sharing it would share the credentials and defeat the whole design. Add
 them per profile with `ccswitch run <name> claude mcp add ...`.
