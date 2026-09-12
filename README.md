@@ -56,8 +56,11 @@ for everything you have already allowed. If you want approvals isolated per clie
 One thing cannot be symlinked: **user-scoped MCP servers**. They live in `.claude.json`, the same
 file that holds the account, so sharing it would share the credentials and defeat the whole design.
 `ccswitch add` copies them into a new profile instead, and `ccswitch sync-mcp <name>` refreshes an
-existing one. That moves configuration only: any server whose `env` or `headers` block could hold a
-token is refused and named, for you to add by hand. Restart a session to pick up new servers.
+existing one. It writes an allowlist of fields - `type`, `command`, `args`, `url` - and nothing
+else. A server carrying anything beyond those, or a url or argv shaped like it holds a credential,
+is refused and named so you can add it by hand. Unrecognised means refused, never copied: a wrong
+refusal costs one `claude mcp add`, a wrong copy puts a client's token in a personal profile.
+Restart a session to pick up new servers.
 
 ## What this does not do
 

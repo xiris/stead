@@ -156,49 +156,105 @@ except Exception:
 
 # MCP servers are the one thing that cannot join CLAUDE_SHARED. They live in .claude.json, the same
 # file that holds oauthAccount, so symlinking it would share the credentials and defeat the tool.
-# Copying just the mcpServers key moves config, not secrets: entries are {type,command,args,env} or
-# {type,url}. An env or headers block CAN hold a token, so those are REFUSED rather than copied -
-# "we never copy a token" is the premise, and quietly copying one would break it for a convenience.
+# Copying just the mcpServers key moves config instead - but "we never copy a token" cannot be held
+# by a denylist of field names. A token rides in a url query string, in userinfo, in an --api-key
+# arg, in a key spelled Env, in an `oauth` block a future version adds. So this is an ALLOWLIST:
+# only type/command/args/url are ever written, anything else with a value gets the entry refused and
+# named, and a credential-shaped url or argv is refused too. Unrecognised means refused, never
+# copied - the same stance as valid_name. A wrong refusal costs one manual `claude mcp add`; a wrong
+# copy puts a client's token in a personal profile.
 cmd_sync_mcp() {
 	local name=${1-}
 	require_profile "$name"
 	command -v python3 >/dev/null 2>&1 || { warn "python3 not found - skipping mcp sync"; return 0; }
 	python3 -c '
-import json, os, sys, tempfile
+import json, os, re, sys, tempfile
+
+ALLOWED = ("type", "command", "args", "url")
+SHAPE = re.compile(r"(?i)(api[-_]?key|access[-_]?token|token|secret|password|passwd|bearer|credential)")
+
+def why(c):
+    """Reason this entry must not be copied, or None."""
+    if not isinstance(c, dict):
+        return "not an object"
+    dropped = sorted(k for k in c if k not in ALLOWED and c.get(k))
+    if dropped:
+        return "field(s) I will not copy blind: " + ", ".join(dropped)
+    url = c.get("url") or ""
+    if not isinstance(url, str):
+        return "url is not a string"
+    host = url.split("//")[-1].split("/")[0]
+    if "@" in host:
+        return "credentials embedded in the url"
+    if "?" in url or "#" in url:
+        return "url carries a query string or fragment"
+    args = c.get("args") or []
+    if not isinstance(args, list):
+        return "args is not a list"
+    blob = " ".join([url, str(c.get("command") or "")] + [str(a) for a in args])
+    if SHAPE.search(blob):
+        return "command, args or url looks like it carries a credential"
+    return None
+
 src_p, dst_p, name = sys.argv[1], sys.argv[2], sys.argv[3]
 try:
     servers = json.load(open(src_p)).get("mcpServers", {})
 except Exception:
     sys.stderr.write("ccswitch: no readable %s - skipping mcp sync\n" % src_p)
     sys.exit(0)
-if not servers:
+if not isinstance(servers, dict) or not servers:
     print("No user-scoped MCP servers to copy.")
     sys.exit(0)
+
+# Absent is fine and means a fresh profile. PRESENT BUT UNPARSEABLE is not: falling back to {} here
+# would rewrite the file and destroy the oauthAccount still sitting in it, recoverable by hand.
 try:
     dst = json.load(open(dst_p))
-except Exception:
+except FileNotFoundError:
     dst = {}
+except Exception:
+    sys.stderr.write("ccswitch: %s exists but is not readable JSON - refusing to overwrite it\n" % dst_p)
+    sys.exit(0)
+if not isinstance(dst, dict):
+    sys.stderr.write("ccswitch: %s is not a JSON object - refusing to overwrite it\n" % dst_p)
+    sys.exit(0)
+
 cur = dst.get("mcpServers", {})
+if not isinstance(cur, dict):
+    sys.stderr.write("ccswitch: mcpServers in %s is not an object - refusing to touch it\n" % dst_p)
+    sys.exit(0)
+
 copied, kept, refused = [], [], []
 for n in sorted(servers):
     c = servers[n]
-    if c.get("env") or c.get("headers"):
-        refused.append(n)
+    reason = why(c)
+    if reason:
+        refused.append((n, reason))
     elif n in cur:
         kept.append(n)
     else:
-        cur[n] = c
+        cur[n] = dict((k, c[k]) for k in ALLOWED if k in c)
         copied.append(n)
 if copied:
     dst["mcpServers"] = cur
     fd, tmp = tempfile.mkstemp(dir=os.path.dirname(dst_p) or ".")
-    with os.fdopen(fd, "w") as f:
-        json.dump(dst, f, indent=2)
-    os.replace(tmp, dst_p)
-for n in copied:  print("  + %s" % n)
-for n in kept:    print("  = %s (already in profile)" % n)
-for n in refused: print("  ! %s (has env/headers that may hold a secret - add it by hand)" % n)
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(dst, f, indent=2)
+        os.replace(tmp, dst_p)
+    except Exception:
+        try: os.unlink(tmp)
+        except OSError: pass
+        raise
+for n in copied:        print("  + %s" % n)
+for n in kept:          print("  = %s (already in profile)" % n)
+for n, r in refused:    print("  ! %s - %s" % (n, r))
 print("%s: %d copied, %d already there, %d refused" % (name, len(copied), len(kept), len(refused)))
+if refused:
+    print("Refused entries are not bugs: add them by hand with `claude mcp add` inside the profile,")
+    print("so a credential is never copied between accounts.")
+if copied:
+    print("Restart any running session for this profile - it will otherwise overwrite this change.")
 ' "$CLAUDE_JSON" "$PROFILES/$name/claude/.claude.json" "$name"
 }
 
@@ -208,7 +264,7 @@ cmd_add() {
 	[ -d "$PROFILES/$name" ] && die "profile '$name' already exists"
 	mkdir -p "$PROFILES/$name/claude" "$PROFILES/$name/codex"
 	link_shared "$name"
-	cmd_sync_mcp "$name"
+	cmd_sync_mcp "$name" || warn "mcp sync failed - profile created, run 'ccswitch sync-mcp $name' later"
 	cat <<EOF
 Created profile '$name'. It shares your config and starts signed out.
 
@@ -359,7 +415,7 @@ ccswitch - bind a Claude Code / Codex account to a directory
   ccswitch which                   the profile governing the current directory
   ccswitch run <name> <cmd>...     run any command inside a profile
   ccswitch doctor [--fix]          check that profiles still share config
-  ccswitch sync-mcp <name>         copy your MCP servers into a profile (config only, never a token)
+  ccswitch sync-mcp <name>         copy your MCP servers into a profile (allowlisted fields only)
 
 Shell integration (zsh/bash) - makes `claude` and `codex` follow the directory:
 

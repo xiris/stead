@@ -23,8 +23,14 @@ cat >"$CCSWITCH_CLAUDE_JSON" <<'JSON'
 {"oauthAccount":{"emailAddress":"real@example.com"},
  "mcpServers":{"plain-http":{"type":"http","url":"https://example.test/mcp"},
                "plain-stdio":{"type":"stdio","command":"/bin/echo","args":[],"env":{}},
-               "has-secret":{"type":"stdio","command":"/bin/echo","env":{"API_KEY":"sk-live-xxx"}},
-               "has-headers":{"type":"http","url":"https://x.test","headers":{"Authorization":"Bearer t"}}}}
+               "has-secret":{"type":"stdio","command":"/bin/echo","env":{"API_KEY":"sk-live-env"}},
+               "has-headers":{"type":"http","url":"https://x.test","headers":{"Authorization":"Bearer sk-live-hdr"}},
+               "url-key":{"type":"http","url":"https://x.test/mcp?api_key=sk-live-url"},
+               "url-userinfo":{"type":"http","url":"https://user:sk-live-userinfo@x.test/mcp"},
+               "args-key":{"type":"stdio","command":"npx","args":["-y","@p/s","--api-key=sk-live-args"]},
+               "case-env":{"type":"stdio","command":"/bin/echo","Env":{"K":"sk-live-case"}},
+               "nested-oauth":{"type":"http","url":"https://y.test/mcp","oauth":{"clientId":"sk-live-oauth"}},
+               "not-an-object":"npx -y @p/s"}}
 JSON
 
 pass=0 fail=0
@@ -254,13 +260,21 @@ try: print(" ".join(sorted(json.load(open(sys.argv[1])).get("mcpServers",{}))))
 except Exception: print("")' "$CCSWITCH_HOME/profiles/$1/claude/.claude.json"; }
 "$CC" add synced >/dev/null
 check "add copies safe servers"   '[ "$(mcp_of synced)" = "plain-http plain-stdio" ]'
-check "env block NOT copied"      '[[ "$(mcp_of synced)" != *has-secret* ]]'
-check "headers block NOT copied"  '[[ "$(mcp_of synced)" != *has-headers* ]]'
-secret_leaked=$(grep -c 'sk-live-xxx' "$CCSWITCH_HOME/profiles/synced/claude/.claude.json" 2>/dev/null || true)
-check "no secret written to disk" '[ "$secret_leaked" = "0" ]'
+# Every refused shape, one assertion each. url-key and args-key are the two that a denylist of
+# env/headers waves through, and the tool then reports them as clean.
+for bad in has-secret has-headers url-key url-userinfo args-key case-env nested-oauth not-an-object; do
+	check "refused: $bad"         '[[ "$(mcp_of synced)" != *"'"$bad"'"* ]]'
+done
+# The real test of the premise: NO credential string reaches the profile, by any route.
+leaked=$(grep -o 'sk-live-[a-z]*' "$CCSWITCH_HOME/profiles/synced/claude/.claude.json" 2>/dev/null | sort -u | tr '\n' ' ')
+check "no secret written to disk" '[ -z "$leaked" ]'
+# Only allowlisted keys are ever written, so a field we do not understand cannot ride along.
+keys=$(python3 -c 'import json,os;d=json.load(open(os.environ["CCSWITCH_HOME"]+"/profiles/synced/claude/.claude.json"));print(" ".join(sorted({k for c in d["mcpServers"].values() for k in c})))')
+check "only allowlisted keys kept" '[[ "$keys" =~ ^(args|command|type|url|\ )+$ ]]'
 out=$("$CC" sync-mcp synced)
 check "sync-mcp is idempotent"    '[ "$(mcp_of synced)" = "plain-http plain-stdio" ]'
-check "sync-mcp reports refusals" '[[ "$out" == *"may hold a secret"* ]]'
+check "sync-mcp names the reason" '[[ "$out" == *"field(s) I will not copy blind: env"* ]]'
+check "sync-mcp says what to do"  '[[ "$out" == *"add them by hand"* ]]'
 
 # It must never clobber a server the profile already defines, nor the profile's own account.
 python3 - <<'PY'
@@ -276,6 +290,25 @@ own=$(python3 -c 'import json,os;d=json.load(open(os.environ["CCSWITCH_HOME"]+"/
 check "does not clobber own entry" '[[ "$own" == *"PROFILE-OWN"* ]]'
 check "does not touch the account" '[[ "$own" == *"profile@example.com"* ]]'
 check "sync-mcp refuses unknown"  '! "$CC" sync-mcp ghost >/dev/null 2>&1'
+
+# An unparseable destination must be left ALONE. Falling back to {} rewrites the file and destroys
+# the oauthAccount still sitting in it, which is recoverable by hand until we overwrite it.
+printf '{"oauthAccount":{"emailAddress":"stranded@example.com"},"mcpServ' \
+	>"$CCSWITCH_HOME/profiles/synced/claude/.claude.json"
+rc=0; "$CC" sync-mcp synced >/dev/null 2>&1 || rc=$?
+salvage=$(grep -c 'stranded@example.com' "$CCSWITCH_HOME/profiles/synced/claude/.claude.json" || true)
+check "truncated dst not clobbered" '[ "$salvage" = "1" ]'
+check "truncated dst exits 0"     '[ "$rc" -eq 0 ]'
+
+# add must survive mcp config it cannot parse - there is no `ccswitch remove` to recover with.
+cat >"$CCSWITCH_CLAUDE_JSON" <<'JSON'
+{"mcpServers":{"legacy":"npx -y @some/mcp"}}
+JSON
+rc=0; out=$("$CC" add survivor 2>&1) || rc=$?
+check "add survives bad mcp config" '[ "$rc" -eq 0 ]'
+check "add still printed its help"  '[[ "$out" == *"bind the current directory"* ]]'
+check "add still linked shared"     '[ -L "$CCSWITCH_HOME/profiles/survivor/claude/CLAUDE.md" ]'
+rm -rf "$CCSWITCH_HOME/profiles/survivor"
 rm -rf "$CCSWITCH_HOME/profiles/synced"
 
 echo "== unuse =="
