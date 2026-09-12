@@ -14,7 +14,7 @@ MARKER=".ccswitch"
 
 # Shared back to the real home. Auth state is deliberately absent: that is the whole point.
 CLAUDE_SHARED=(CLAUDE.md settings.json plugins skills agents commands)
-CODEX_SHARED=(config.toml)
+CODEX_SHARED=(config.toml plugins skills)
 
 die()  { printf 'ccswitch: %s\n' "$*" >&2; exit 1; }
 warn() { printf 'ccswitch: %s\n' "$*" >&2; }
@@ -74,10 +74,18 @@ link_one() {
 	ln -sfn "$src" "$dst"
 }
 
-link_shared() {
+# Emits every shared link for a profile as "<label>\t<src>\t<dst>". The single source of truth for
+# what is shared: link_shared and doctor both read it, so doctor cannot fall behind the lists again.
+each_shared() {
 	local name=$1 f
-	for f in "${CLAUDE_SHARED[@]}"; do link_one "$CLAUDE_HOME/$f" "$PROFILES/$name/claude/$f"; done
-	for f in "${CODEX_SHARED[@]}"; do link_one "$CODEX_REAL/$f" "$PROFILES/$name/codex/$f"; done
+	for f in "${CLAUDE_SHARED[@]}"; do printf 'claude/%s\t%s\t%s\n' "$f" "$CLAUDE_HOME/$f" "$PROFILES/$name/claude/$f"; done
+	for f in "${CODEX_SHARED[@]}"; do printf 'codex/%s\t%s\t%s\n'  "$f" "$CODEX_REAL/$f"  "$PROFILES/$name/codex/$f"; done
+}
+
+link_shared() {
+	local label src dst
+	# Process substitution, not a pipe: a piped `while` runs in a subshell and loses what it sets.
+	while IFS=$'\t' read -r label src dst; do link_one "$src" "$dst"; done < <(each_shared "$1")
 }
 
 # The account a claude profile is signed in as, or empty. Reads .claude.json, which is the file
@@ -106,8 +114,8 @@ EOF
 }
 
 cmd_list() {
-	local here name acct mark
-	here=$(resolve || true)
+	local here name acct mark rc=0
+	here=$(resolve) || rc=$?
 	[ -d "$PROFILES" ] || { echo "No profiles yet. Create one with: ccswitch add <name>"; return 0; }
 	printf '%-16s %-34s %-7s %s\n' PROFILE CLAUDE CODEX ''
 	for name in $(ls -1 "$PROFILES" 2>/dev/null); do
@@ -119,7 +127,11 @@ cmd_list() {
 			"$([ -f "$PROFILES/$name/codex/auth.json" ] && echo 'authed' || echo '-')" \
 			"$mark"
 	done
-	[ -z "$here" ] && printf '\n%s\n' "This directory is unbound - claude and codex use your default account."
+	if [ "$rc" -eq 2 ]; then
+		printf '\n%s\n' "This directory's $MARKER is unusable (see the warning above) - claude and codex refuse to run here until it is fixed."
+	elif [ -z "$here" ]; then
+		printf '\n%s\n' "This directory is unbound - claude and codex use your default account."
+	fi
 	return 0
 }
 
@@ -129,6 +141,9 @@ cmd_use() {
 	printf '%s\n' "$name" >"$PWD/$MARKER"
 	echo "Bound $PWD to profile '$name'. New claude/codex sessions here will use it."
 	echo "Existing sessions keep the account they launched with - restart them to switch."
+	if git rev-parse --is-inside-work-tree >/dev/null 2>&1 && ! git check-ignore -q "$MARKER" 2>/dev/null; then
+		echo "Note: $MARKER is not gitignored here - committing it would publish the profile name."
+	fi
 }
 
 cmd_unuse() {
@@ -176,18 +191,17 @@ cmd_login() {
 # A symlink replaced by a real file is the known failure mode: an atomic write (temp file + rename)
 # clobbers the link and silently unshares that config. Cheap to detect, cheap to repair.
 cmd_doctor() {
-	local name f dst src broken=0
+	local name label src dst broken=0
 	[ -d "$PROFILES" ] || { echo "No profiles yet."; return 0; }
 	for name in $(ls -1 "$PROFILES" 2>/dev/null); do
-		for f in "${CLAUDE_SHARED[@]}"; do
-			src="$CLAUDE_HOME/$f"; dst="$PROFILES/$name/claude/$f"
+		while IFS=$'\t' read -r label src dst; do
 			[ -e "$src" ] || continue
 			if [ ! -L "$dst" ]; then
 				broken=$((broken + 1))
-				printf '%s: %s is %s\n' "$name" "$f" \
+				printf '%s: %s is %s\n' "$name" "$label" \
 					"$([ -e "$dst" ] && echo 'a real file (no longer shared)' || echo 'missing')"
 			fi
-		done
+		done < <(each_shared "$name")
 	done
 	if [ "$broken" -eq 0 ]; then
 		echo "All profiles share config correctly."
@@ -196,10 +210,9 @@ cmd_doctor() {
 	printf '\n%s\n' "$broken link(s) not shared. Re-link with: ccswitch doctor --fix"
 	if [ "${1-}" = "--fix" ]; then
 		for name in $(ls -1 "$PROFILES" 2>/dev/null); do
-			for f in "${CLAUDE_SHARED[@]}"; do
-				dst="$PROFILES/$name/claude/$f"
+			while IFS=$'\t' read -r label src dst; do
 				[ -L "$dst" ] || rm -rf "$dst"
-			done
+			done < <(each_shared "$name")
 			link_shared "$name"
 		done
 		echo "Re-linked. Anything that was overwritten in a profile is gone; the shared copy wins."

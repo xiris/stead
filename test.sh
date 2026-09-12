@@ -9,11 +9,12 @@ trap 'rm -rf "$TMP"' EXIT
 export CCSWITCH_HOME="$TMP/state"
 export CCSWITCH_CLAUDE_HOME="$TMP/fake-claude"
 export CCSWITCH_CODEX_HOME="$TMP/fake-codex"
-mkdir -p "$CCSWITCH_CLAUDE_HOME/plugins" "$CCSWITCH_CODEX_HOME"
+mkdir -p "$CCSWITCH_CLAUDE_HOME/plugins" "$CCSWITCH_CODEX_HOME/skills" "$CCSWITCH_CODEX_HOME/plugins"
 echo "GLOBAL AGREEMENT" >"$CCSWITCH_CLAUDE_HOME/CLAUDE.md"
 echo '{"a":1}' >"$CCSWITCH_CLAUDE_HOME/settings.json"
 echo "plugin" >"$CCSWITCH_CLAUDE_HOME/plugins/p.txt"
 echo "trust=1" >"$CCSWITCH_CODEX_HOME/config.toml"
+echo "codex skill" >"$CCSWITCH_CODEX_HOME/skills/s.txt"
 
 pass=0 fail=0
 ok()  { pass=$((pass+1)); printf '  ok   %s\n' "$1"; }
@@ -37,6 +38,8 @@ check "CLAUDE.md shared"          '[ -L "$CCSWITCH_HOME/profiles/work/claude/CLA
 check "shared content readable"   '[ "$(cat "$CCSWITCH_HOME/profiles/work/claude/CLAUDE.md")" = "GLOBAL AGREEMENT" ]'
 check "plugins dir shared"        '[ -L "$CCSWITCH_HOME/profiles/work/claude/plugins" ]'
 check "codex config shared"       '[ -L "$CCSWITCH_HOME/profiles/work/codex/config.toml" ]'
+check "codex skills shared"       '[ -L "$CCSWITCH_HOME/profiles/work/codex/skills" ]'
+check "codex plugins shared"      '[ -L "$CCSWITCH_HOME/profiles/work/codex/plugins" ]'
 check "auth NOT shared"           '[ ! -e "$CCSWITCH_HOME/profiles/work/claude/.credentials.json" ]'
 check "duplicate add refused"     '! "$CC" add work >/dev/null 2>&1'
 
@@ -122,12 +125,45 @@ rm "$CCSWITCH_HOME/profiles/work/claude/settings.json"
 echo '{"clobbered":1}' >"$CCSWITCH_HOME/profiles/work/claude/settings.json"
 doc=$("$CC" doctor)
 check "doctor spots real file"    '[[ "$doc" == *"no longer shared"* ]]'
-check "doctor names the profile"  '[[ "$doc" == *"work: settings.json"* ]]'
+check "doctor names the profile"  '[[ "$doc" == *"work: claude/settings.json"* ]]'
 "$CC" doctor --fix >/dev/null
 check "doctor --fix re-links"     '[ -L "$CCSWITCH_HOME/profiles/work/claude/settings.json" ]'
 check "shared content restored"   '[ "$(cat "$CCSWITCH_HOME/profiles/work/claude/settings.json")" = "{\"a\":1}" ]'
 doc=$("$CC" doctor)
 check "doctor clean after fix"    '[[ "$doc" == *"share config correctly"* ]]'
+
+echo "== doctor covers the codex side too, not just claude ==" 
+# The lists are consumed from one definition; a doctor that walked only CLAUDE_SHARED reported a
+# clobbered codex/config.toml as healthy while --fix silently repaired it.
+rm "$CCSWITCH_HOME/profiles/work/codex/config.toml"
+echo 'clobbered=1' >"$CCSWITCH_HOME/profiles/work/codex/config.toml"
+doc=$("$CC" doctor)
+check "doctor spots codex file"   '[[ "$doc" == *"work: codex/config.toml"* ]]'
+"$CC" doctor --fix >/dev/null
+check "doctor --fix relinks codex" '[ -L "$CCSWITCH_HOME/profiles/work/codex/config.toml" ]'
+check "codex content restored"    '[ "$(cat "$CCSWITCH_HOME/profiles/work/codex/config.toml")" = "trust=1" ]'
+
+echo "== list must not call a fail-closed directory 'unbound' =="
+# rc=2 (refuse) reported as "uses your default account" is the exact lie the tool exists to prevent.
+printf 'work\n' >"$TMP/proj/.ccswitch"
+out=$(cd "$TMP/proj" && "$CC" list 2>/dev/null)
+check "bound dir marked active"   '[[ "$out" == *"<- active here"* ]]'
+out=$(cd "$TMP/elsewhere" && "$CC" list 2>/dev/null)
+check "unbound dir says unbound"  '[[ "$out" == *"unbound - claude and codex use your default account"* ]]'
+printf '../../etc\n' >"$TMP/proj/.ccswitch"
+out=$(cd "$TMP/proj" && "$CC" list 2>/dev/null)
+check "bad marker NOT called unbound" '[[ "$out" != *"use your default account"* ]]'
+check "bad marker says refuse"    '[[ "$out" == *"refuse to run here"* ]]'
+printf 'work\n' >"$TMP/proj/.ccswitch"
+
+echo "== use warns when the marker would be committed =="
+# .ccswitch names a profile, which can be a client's name.
+git -C "$TMP/proj" init -q 2>/dev/null
+out=$(cd "$TMP/proj" && "$CC" use work)
+check "warns when not ignored"    '[[ "$out" == *"not gitignored"* ]]'
+echo ".ccswitch" >"$TMP/proj/.gitignore"
+out=$(cd "$TMP/proj" && "$CC" use work)
+check "silent when ignored"       '[[ "$out" != *"not gitignored"* ]]'
 
 echo "== unuse =="
 ( cd "$TMP/proj" && "$CC" unuse >/dev/null )
