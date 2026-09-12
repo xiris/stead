@@ -19,7 +19,7 @@ The stack's `standards/biome.json` does **not** apply here. It's a shell project
 
 ```bash
 bash -n bin/ccswitch && bash -n test.sh   # syntax
-./test.sh                                 # 107 assertions, must print "0 failed"
+./test.sh                                 # 120 assertions, must print "0 failed"
 shellcheck bin/ccswitch test.sh           # optional - not installed on this machine
 ```
 
@@ -30,8 +30,10 @@ shellcheck bin/ccswitch test.sh           # optional - not installed on this mac
 Four facts carry the whole design. Violating any of them breaks the premise.
 
 - **Isolation is native, not ours.** `CLAUDE_CONFIG_DIR` and `CODEX_HOME` give each profile its own
-  credentials. We never read, write, or copy a token, and never touch the keychain. Every competing
-  tool swaps one shared credential slot, which is why none can do per-project.
+  credentials. We never read, write, or copy a credential store, and never touch the keychain. Every
+  competing tool swaps one shared credential slot, which is why none can do per-project.
+  The one place we copy config a user wrote is `sync-mcp`, and it is an allowlist that refuses
+  anything credential-shaped - see `cmd_sync_mcp`. That refusal is a trust boundary, not a nicety.
 - **The env var must be set before the process starts.** `.claude/settings.json`'s `env` block is
   read *after* credentials load, so it cannot select an account. Verified empirically, not assumed.
   This is why a shell wrapper exists at all, and why nothing here can be pure project config.

@@ -168,10 +168,32 @@ cmd_sync_mcp() {
 	require_profile "$name"
 	command -v python3 >/dev/null 2>&1 || { warn "python3 not found - skipping mcp sync"; return 0; }
 	python3 -c '
-import json, os, re, sys, tempfile
+import json, math, os, re, sys, tempfile
+from collections import Counter
 
 ALLOWED = ("type", "command", "args", "url")
-SHAPE = re.compile(r"(?i)(api[-_]?key|access[-_]?token|token|secret|password|passwd|bearer|credential)")
+# Round 2 of review: replacing a denylist of field NAMES with a denylist of credential WORDS was the
+# same mistake one layer down. A postgres/mysql/redis MCP server takes its DSN as a positional arg,
+# so postgresql://user:password@host reached the profile and was reported as copied-clean. These
+# rules therefore apply to EVERY string in an entry - url, command and each arg alike - and lead
+# with shape (a uri with userinfo, a known prefix, a long high-entropy token) rather than with
+# vocabulary, because a secret is defined by being unguessable, not by being labelled.
+WORDS = re.compile(r"(?i)(api[-_]?key|access[-_]?token|token|secret|password|passwd|pwd|bearer|"
+                   r"credential|auth|dsn|session|signature)")
+URI_USERINFO = re.compile(r"[a-zA-Z][a-zA-Z0-9+.\-]*://[^/\s@]*:[^/\s@]*@")
+PARAM = re.compile(r"[?#;][A-Za-z0-9_.\-]+=")
+PREFIX = re.compile(r"(?:^|[^A-Za-z0-9])(gh[porsu]_|github_pat_|sk-|xox[baprs]-|AKIA|ASIA|eyJ|AIza|glpat-)")
+SPLIT = re.compile(r"[/\s=:?#&;,\"\x27]+")
+
+def opaque(tok):
+    """Long and disordered enough to be a secret rather than a package, path or host name."""
+    if len(tok) < 24 or "." in tok:
+        return False
+    if sum(bool(re.search(pat, tok)) for pat in (r"[a-z]", r"[A-Z]", r"[0-9]")) < 2:
+        return False
+    n = len(tok)
+    ent = -sum((c / n) * math.log(c / n, 2) for c in Counter(tok).values())
+    return ent >= 3.4
 
 def why(c):
     """Reason this entry must not be copied, or None."""
@@ -180,20 +202,30 @@ def why(c):
     dropped = sorted(k for k in c if k not in ALLOWED and c.get(k))
     if dropped:
         return "field(s) I will not copy blind: " + ", ".join(dropped)
-    url = c.get("url") or ""
-    if not isinstance(url, str):
+    url, cmd, args = c.get("url"), c.get("command"), c.get("args")
+    if url is not None and not isinstance(url, str):
         return "url is not a string"
-    host = url.split("//")[-1].split("/")[0]
-    if "@" in host:
-        return "credentials embedded in the url"
-    if "?" in url or "#" in url:
-        return "url carries a query string or fragment"
-    args = c.get("args") or []
-    if not isinstance(args, list):
+    if cmd is not None and not isinstance(cmd, str):
+        return "command is not a string"
+    if args is not None and not isinstance(args, list):
         return "args is not a list"
-    blob = " ".join([url, str(c.get("command") or "")] + [str(a) for a in args])
-    if SHAPE.search(blob):
-        return "command, args or url looks like it carries a credential"
+    strings = [x for x in ([url, cmd] + list(args or [])) if x is not None]
+    if any(not isinstance(x, str) for x in strings):
+        return "args contains a non-string"
+    for x in strings:
+        if URI_USERINFO.search(x):
+            return "a uri with an embedded username and password"
+        if PARAM.search(x):
+            return "a url parameter that could carry a credential"
+        if PREFIX.search(x):
+            return "a recognisable credential prefix"
+        if WORDS.search(x):
+            return "text that names a credential"
+        for tok in SPLIT.split(x):
+            if opaque(tok):
+                return "a long high-entropy token that looks like a secret"
+    if not (cmd or url):
+        return "neither a command nor a url to copy"
     return None
 
 src_p, dst_p, name = sys.argv[1], sys.argv[2], sys.argv[3]

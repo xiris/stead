@@ -67,8 +67,14 @@ Restart a session to pick up new servers.
 **Switch a running session.** The variables are read at process launch, so a live session keeps the
 account it started with. Restart it.
 
-**Touch your credentials.** No token is read, written, or copied, and the keychain is never
-modified. That is the difference from every alternative below.
+**Touch your credential store.** Nothing reads, writes or copies `.credentials.json`, and the
+keychain is never modified. That is the difference from every alternative below.
+
+The one exception worth knowing: `sync-mcp` copies MCP server *definitions* between profiles, and a
+server definition can contain a secret - a database URI with a password in it, an API key in an
+argument. It copies an allowlist of fields and refuses any entry carrying a uri with credentials, a
+known token prefix, or a long high-entropy string, naming what it refused. Treat that as a strong
+filter, not a proof: if a server's definition holds something sensitive, add it by hand.
 
 ## Why not the existing tools
 

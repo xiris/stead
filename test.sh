@@ -311,6 +311,47 @@ check "add still linked shared"     '[ -L "$CCSWITCH_HOME/profiles/survivor/clau
 rm -rf "$CCSWITCH_HOME/profiles/survivor"
 rm -rf "$CCSWITCH_HOME/profiles/synced"
 
+echo "== the guard is shape-based, and reads EVERY string in an entry ==" 
+# A denylist of field names missed url/args. A denylist of credential words then missed a DSN in
+# args, which is how postgres-mcp, mysql-mcp and redis-mcp are all documented to be invoked.
+cat >"$TMP/leaks.json" <<'JSON'
+{"mcpServers":{
+ "pg-uri":{"type":"stdio","command":"uvx","args":["postgres-mcp","postgresql://app:LEAKPG@db.internal:5432/prod"]},
+ "redis-uri":{"type":"stdio","command":"npx","args":["-y","@redis/mcp","redis://default:LEAKREDIS@cache:6379"]},
+ "zapier":{"type":"http","url":"https://mcp.zapier.com/api/mcp/s/LEAKZAPIERaBcDeF0123456789xy/sse"},
+ "smithery":{"type":"stdio","command":"npx","args":["-y","@smithery/cli","--key","LEAKSMITHERYf81d4fae7dec11d0a7"]},
+ "jwt":{"type":"http","url":"https://x.test/mcp/eyJhbGciOiJIUzI1NiLEAKJWTInR5cCI6IkpXVCJ9"},
+ "ghp":{"type":"stdio","command":"srv","args":["ghp_16C7eLEAKPAT292c6912E7710c838347Ae17"]},
+ "query-nonword":{"type":"http","url":"https://x.test/mcp?k=LEAKQUERY9f86d081884c7d659a"},
+ "matrix":{"type":"http","url":"https://x.test/mcp;k=LEAKMATRIX9f86d081884c7d65"},
+ "filesystem":{"type":"stdio","command":"npx","args":["-y","@modelcontextprotocol/server-filesystem","/Users/x/Projects"],"env":{}},
+ "sentry":{"type":"http","url":"https://mcp.sentry.dev/mcp"},
+ "ghdocker":{"type":"stdio","command":"docker","args":["run","-i","--rm","ghcr.io/github/github-mcp-server"],"env":{}}}}
+JSON
+CCSWITCH_CLAUDE_JSON="$TMP/leaks.json" "$CC" add shapes >/dev/null 2>&1
+got=$(mcp_of shapes)
+# Overcorrection is a real cost, so the legit set is asserted exactly, not just "some copied".
+check "real servers still copied"  '[ "$got" = "filesystem ghdocker sentry" ]'
+for bad in pg-uri redis-uri zapier smithery jwt ghp query-nonword matrix; do
+	check "refused: $bad"         '[[ "$got" != *"'"$bad"'"* ]]'
+done
+# query-nonword and matrix have no credential WORD in them: they exercise the parameter rule alone,
+# which had no independent coverage - deleting that rule left the suite green.
+leaked=$(grep -oE 'LEAK[A-Z]+' "$CCSWITCH_HOME/profiles/shapes/claude/.claude.json" 2>/dev/null | sort -u | tr '\n' ' ')
+check "no secret reaches disk"     '[ -z "$leaked" ]'
+rm -rf "$CCSWITCH_HOME/profiles/shapes"
+
+echo "== add survives python3 itself failing =="
+# The || warn safety net had no coverage: every malformed source was handled INSIDE python, so it
+# exited 0 and the branch never ran.
+mkdir -p "$TMP/pyfail"
+printf '#!/bin/sh\nexit 3\n' >"$TMP/pyfail/python3"; chmod +x "$TMP/pyfail/python3"
+rc=0; out=$(PATH="$TMP/pyfail:$PATH" "$CC" add pfail 2>&1) || rc=$?
+check "add survives python3 dying" '[ "$rc" -eq 0 ]'
+check "add warns sync failed"      '[[ "$out" == *"mcp sync failed"* ]]'
+check "add still built the profile" '[ -L "$CCSWITCH_HOME/profiles/pfail/claude/CLAUDE.md" ]'
+rm -rf "$CCSWITCH_HOME/profiles/pfail"
+
 echo "== unuse =="
 ( cd "$TMP/proj" && "$CC" unuse >/dev/null )
 check "marker removed"            '[ ! -f "$TMP/proj/.ccswitch" ]'
