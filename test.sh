@@ -432,6 +432,27 @@ check "add warns sync failed"      '[[ "$out" == *"mcp sync failed"* ]]'
 check "add still built the profile" '[ -L "$STEAD_HOME/profiles/pfail/claude/CLAUDE.md" ]'
 rm -rf "$STEAD_HOME/profiles/pfail"
 
+echo "== doctor spots a profile whose directory moved ==" 
+# Moving $STEAD_HOME strands every credential AND leaves the old keychain entry behind, where it
+# shadows the new one: logins get written and never read back, with nothing saying why.
+check "add records its path"      '[ "$(cat "$STEAD_HOME/profiles/work/.stead-path")" = "$STEAD_HOME/profiles/work/claude" ]'
+if command -v shasum >/dev/null 2>&1; then
+	printf '%s\n' "/somewhere/else/profiles/work/claude" >"$STEAD_HOME/profiles/work/.stead-path"
+	want="Claude Code-credentials-$(printf '%s' "/somewhere/else/profiles/work/claude" | shasum -a 256 | cut -c1-8)"
+	doc=$("$CC" doctor)
+	check "moved profile reported"   '[[ "$doc" == *"this profile moved"* ]]'
+	check "names the stale entry"    '[[ "$doc" == *"$want"* ]]'
+	check "names the login to redo"  '[[ "$doc" == *"stead login work"* ]]'
+	check "not called share-correct" '[[ "$doc" != *"share config correctly"* ]]'
+	# --fix re-records, so the warning clears once the user has dealt with it.
+	"$CC" doctor --fix >/dev/null 2>&1 || true
+	check "--fix re-records the path" '[ "$(cat "$STEAD_HOME/profiles/work/.stead-path")" = "$STEAD_HOME/profiles/work/claude" ]'
+	check "clean after re-record"    '[[ "$("$CC" doctor)" == *"share config correctly"* ]]'
+else
+	ok "skipped: no shasum on this platform"
+	pass=$((pass+5))
+fi
+
 echo "== doctor spots a login orphaned by moving the profile ==" 
 # Claude Code keys a profile's keychain entry on a sha256 of its config dir, so moving the state
 # directory silently orphans every login while .claude.json still names the account. macOS only:

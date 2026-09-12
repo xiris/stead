@@ -20,7 +20,7 @@ The stack's `standards/biome.json` does **not** apply here. It's a shell project
 
 ```bash
 bash -n bin/stead && bash -n test.sh   # syntax
-./test.sh                                 # 155 assertions, must print "0 failed"
+./test.sh                                 # 162 assertions, must print "0 failed"
 shellcheck bin/stead test.sh hooks/*      # must be clean; CI runs it too
 ./hooks/pre-commit                        # all of the above in one gate
 ```
@@ -62,11 +62,16 @@ without passing pre-commit. All three failure modes are proven to exit non-zero,
 
 ## Gotchas
 
-- **Moving `$STEAD_HOME` orphans every login.** Claude Code keys the keychain entry on
-  `sha256(config dir)[:8]`, so a profile at a new path has no credential even though its
-  `.claude.json` still names the account. Cost an evening's confusion after renaming ccswitch to
-  stead. `doctor` reports it now; `needs_login` is the check, and it reports one way only because
-  an entry exists before a login succeeds, so presence proves nothing.
+- **Moving `$STEAD_HOME` strands every login, and the stale entry then shadows the new one.**
+  Claude Code keys the keychain entry on `sha256(config dir)[:8]`. After a move each profile has
+  TWO entries, logins write the new one and reads land on the old, so every session asks to sign in
+  again and nothing says why. Proven by a control profile created after the move: one entry, and it
+  persisted. Cost an evening after renaming ccswitch to stead.
+  `record_path` writes each profile's config dir at `add` time, `stale_key` compares it and computes
+  the dead hash, and `doctor` prints the `security delete-generic-password` line. It never deletes:
+  that is the credential store, and not touching it is the whole premise.
+  `needs_login` is separate and reports one way only, because an entry exists before a login
+  succeeds, so presence proves nothing.
 
 - **`cmd | grep -q` under `set -o pipefail` scores a false failure.** grep exits at the first match,
   the writer takes SIGPIPE, the pipeline returns 141. Cost an hour of chasing a bug in `doctor` that

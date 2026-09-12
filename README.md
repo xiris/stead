@@ -82,10 +82,12 @@ profile's directory, so hiding it in the registry would be theatre.
 
 ## What this doesn't do
 
-**Survive moving `~/.stead`.** Claude Code keys a profile's keychain entry on a hash of its config
-directory, so moving the state directory orphans every login even though the profile still names the
-account. `stead doctor` spots it and tells you which profiles need `stead login` again. Move the
-directory if you need to, just expect to sign in once afterwards.
+**Survive moving `~/.stead` on its own.** Claude Code keys a profile's keychain entry on a hash of
+its config directory. Move the state directory and every profile gets a new entry while the old one
+stays behind, where it shadows the new one: logins are written and never read back, so every session
+asks you to sign in again. `stead doctor` detects the move, names the stale keychain entry and gives
+you the command to remove it. It won't remove it itself, because nothing here touches the credential
+store.
 
 **Switch a running session.** The variables are read when the process launches, so a live session
 keeps the account it started with. Restart it.

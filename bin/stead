@@ -284,6 +284,7 @@ if mode == "audit":
             r = why(held[n])
             if r:
                 print("%s: mcp server %s - %s" % (name, n, r))
+                print("    remove it, then re-add it inside the profile:  stead run %s claude mcp add %s ..." % (name, n))
     sys.exit(0)
 
 try:
@@ -358,6 +359,7 @@ cmd_add() {
 	valid_name "$name" || die "usage: stead add <name>   (letters, digits, . _ -)"
 	[ -d "$PROFILES/$name" ] && die "profile '$name' already exists"
 	mkdir -p "$PROFILES/$name/claude" "$PROFILES/$name/codex"
+	record_path "$name"
 	link_shared "$name"
 	cmd_sync_mcp "$name" || warn "mcp sync failed - profile created, run 'stead sync-mcp $name' later"
 	cat <<EOF
@@ -461,6 +463,30 @@ cmd_login() {
 # orphans its login even though .claude.json still names the account. Absence of the entry proves a
 # profile cannot be signed in. Presence proves nothing: an entry exists before a login succeeds.
 # Reported one way only, which is the half that is true.
+# Claude Code keys a profile's keychain entry on sha256(config dir)[:8], so moving $STEAD_HOME
+# strands every credential AND leaves the old entry behind. Two entries for one account is worse
+# than none: logins are written and never read back, and nothing anywhere says why. Cost an evening.
+#
+# We record the path a profile was built at so we can compute the stale hash later. We do NOT delete
+# it. Removing a keychain entry is touching the credential store, which is the one thing this tool
+# promises never to do, so it names the entry and the command and leaves the choice with the user.
+PATHFILE=".stead-path"
+
+record_path() {
+	printf '%s\n' "$PROFILES/$1/claude" >"$PROFILES/$1/$PATHFILE"
+}
+
+# Prints the stale keychain service name if this profile has moved, or nothing.
+stale_key() {
+	local name=$1 was now
+	[ -f "$PROFILES/$name/$PATHFILE" ] || return 0
+	command -v shasum >/dev/null 2>&1 || return 0
+	IFS= read -r was <"$PROFILES/$name/$PATHFILE" || return 0
+	now="$PROFILES/$name/claude"
+	[ "$was" = "$now" ] && return 0
+	printf 'Claude Code-credentials-%s' "$(printf '%s' "$was" | shasum -a 256 | cut -c1-8)"
+}
+
 needs_login() {
 	local dir=$1 h
 	command -v security >/dev/null 2>&1 || return 1      # not macOS: make no claim
@@ -480,7 +506,7 @@ cmd_version() {
 }
 
 cmd_doctor() {
-	local name label src dst broken=0 flagged=0 mcpbad
+	local name label src dst broken=0 flagged=0 mcpbad stale
 	[ -d "$PROFILES" ] || { echo "No profiles yet."; return 0; }
 	while IFS= read -r name; do
 		while IFS=$'\t' read -r label src dst; do
@@ -490,6 +516,13 @@ cmd_doctor() {
 					"$([ -e "$dst" ] && echo 'a real file (no longer shared)' || echo 'missing')"
 			fi
 		done < <(each_shared "$name")
+		stale=$(stale_key "$name")
+		if [ -n "$stale" ]; then
+			printf '%s: this profile moved, so its old credential is stranded and will shadow the new one.\n' "$name"
+			printf '    remove it with:  security delete-generic-password -s "%s"\n' "$stale"
+			printf '    then:            stead login %s\n' "$name"
+			flagged=$((flagged + 1))
+		fi
 		if [ -n "$(claude_account "$name")" ] && needs_login "$PROFILES/$name/claude"; then
 			printf '%s: signed in as %s, but no credential for this path - run: stead login %s\n' \
 				"$name" "$(claude_account "$name")" "$name"
@@ -508,12 +541,11 @@ cmd_doctor() {
 	# Deliberately NOT folded into --fix: relinking cannot fix these, and a --fix that printed
 	# success over them would be the fabricated-repair bug this file already fixed once.
 	if [ "$flagged" -gt 0 ]; then
-		printf '\n%s\n' "$flagged item(s) above need attention. A profile with no credential for its path needs a fresh login. An mcp server that would not pass the copy guard should be removed and re-added inside the profile with: stead run <profile> claude mcp add ..."
+		printf '\n%s\n' "$flagged item(s) above need attention. Each line says what to run."
 	fi
-	if [ "$broken" -eq 0 ]; then
-		return 0
+	if [ "$broken" -gt 0 ]; then
+		printf '\n%s\n' "$broken link(s) not shared. Re-link with: stead doctor --fix"
 	fi
-	printf '\n%s\n' "$broken link(s) not shared. Re-link with: stead doctor --fix"
 	if [ "${1-}" = "--fix" ]; then
 		while IFS= read -r name; do
 			while IFS=$'\t' read -r label src dst; do
@@ -524,6 +556,7 @@ cmd_doctor() {
 				:
 			done < <(each_shared "$name")
 			link_shared "$name"
+			record_path "$name"
 		done < <(profile_names)
 			echo "Re-linked. A profile directory was merged into the shared copy, which wins a collision;"
 		echo "a profile FILE that had replaced a shared one is gone."
