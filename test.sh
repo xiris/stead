@@ -14,6 +14,9 @@ echo "GLOBAL AGREEMENT" >"$CCSWITCH_CLAUDE_HOME/CLAUDE.md"
 echo '{"a":1}' >"$CCSWITCH_CLAUDE_HOME/settings.json"
 echo "plugin" >"$CCSWITCH_CLAUDE_HOME/plugins/p.txt"
 echo "trust=1" >"$CCSWITCH_CODEX_HOME/config.toml"
+mkdir -p "$CCSWITCH_CLAUDE_HOME/hooks"
+echo "#!/bin/sh" >"$CCSWITCH_CLAUDE_HOME/hooks/gate.sh"
+echo '{"permissions":{"allow":["Bash(ls:*)"]}}' >"$CCSWITCH_CLAUDE_HOME/settings.local.json"
 echo "codex skill" >"$CCSWITCH_CODEX_HOME/skills/s.txt"
 
 pass=0 fail=0
@@ -37,6 +40,9 @@ check "profile dirs created"      '[ -d "$CCSWITCH_HOME/profiles/work/claude" ] 
 check "CLAUDE.md shared"          '[ -L "$CCSWITCH_HOME/profiles/work/claude/CLAUDE.md" ]'
 check "shared content readable"   '[ "$(cat "$CCSWITCH_HOME/profiles/work/claude/CLAUDE.md")" = "GLOBAL AGREEMENT" ]'
 check "plugins dir shared"        '[ -L "$CCSWITCH_HOME/profiles/work/claude/plugins" ]'
+check "hooks dir shared"          '[ -L "$CCSWITCH_HOME/profiles/work/claude/hooks" ]'
+check "hook script readable"      '[ -f "$CCSWITCH_HOME/profiles/work/claude/hooks/gate.sh" ]'
+check "local permissions shared"  '[ -L "$CCSWITCH_HOME/profiles/work/claude/settings.local.json" ]'
 check "codex config shared"       '[ -L "$CCSWITCH_HOME/profiles/work/codex/config.toml" ]'
 check "codex skills shared"       '[ -L "$CCSWITCH_HOME/profiles/work/codex/skills" ]'
 check "codex plugins shared"      '[ -L "$CCSWITCH_HOME/profiles/work/codex/plugins" ]'

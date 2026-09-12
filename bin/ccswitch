@@ -13,7 +13,11 @@ CODEX_REAL="${CCSWITCH_CODEX_HOME:-$HOME/.codex}"
 MARKER=".ccswitch"
 
 # Shared back to the real home. Auth state is deliberately absent: that is the whole point.
-CLAUDE_SHARED=(CLAUDE.md settings.json plugins skills agents commands)
+# hooks: the DEFINITIONS live in settings.json, but the scripts they name live here. They happen to
+# resolve today because the commands are absolute paths; sharing the directory means a hook written
+# with a relative path does not silently stop firing inside a profile.
+# settings.local.json: the permissions allowlist. Unshared, a profile re-prompts for everything.
+CLAUDE_SHARED=(CLAUDE.md settings.json settings.local.json plugins skills agents commands hooks)
 CODEX_SHARED=(config.toml plugins skills)
 
 die()  { printf 'ccswitch: %s\n' "$*" >&2; exit 1; }

@@ -42,8 +42,13 @@ directories and you get fully separate credentials, with no shared slot to fight
 walks up from `$PWD` for a `.ccswitch` file naming a profile, then launches the real binary with
 those variables set.
 
-Only auth is separated. `CLAUDE.md`, `settings.json`, `plugins`, `skills`, `agents` and `commands`
-are symlinked back to `~/.claude`, so every profile has your full setup and you maintain it once.
+Only auth is separated. `CLAUDE.md`, `settings.json`, `settings.local.json`, `plugins`, `skills`,
+`agents`, `commands` and `hooks` are symlinked back to `~/.claude`, so every profile has your full
+setup and you maintain it once. On the Codex side it is `config.toml`, `plugins` and `skills`.
+
+One thing cannot be shared: **user-scoped MCP servers**. They live in `.claude.json`, the same file
+that holds the account, so sharing it would share the credentials and defeat the whole design. Add
+them per profile with `ccswitch run <name> claude mcp add ...`.
 
 ## What this does not do
 
