@@ -185,10 +185,36 @@ echo "== a tab or newline in a home path is refused at startup =="
 tabhome="$TMP/cl$(printf '\t')aude"
 mkdir -p "$tabhome"
 rc=0; out=$(CCSWITCH_CLAUDE_HOME="$tabhome" "$CC" doctor 2>&1) || rc=$?
-check "tab in home refused"       '[ "$rc" -ne 0 ]'
+check "tab in home exits 2"       '[ "$rc" -eq 2 ]'
 check "tab refusal explains why"  '[[ "$out" == *"tab or newline"* ]]'
 rc=0; out=$(CCSWITCH_HOME="$TMP/st$(printf '\t')ate" "$CC" list 2>&1) || rc=$?
-check "tab in CCSWITCH_HOME too"  '[ "$rc" -ne 0 ]'
+check "tab in CCSWITCH_HOME too"  '[ "$rc" -eq 2 ]'
+rc=0; CCSWITCH_CLAUDE_HOME="$tabhome" "$CC" which >/dev/null 2>&1 || rc=$?
+check "which exits 2, not 1"      '[ "$rc" -eq 2 ]'
+# Exit 1 here would mean "unbound" to the wrapper, which would then run the DEFAULT account in a
+# repo explicitly bound to a client profile. That is the failure the whole tool exists to prevent.
+printf 'work\n' >"$TMP/proj/.ccswitch"
+out_tab=$(cd "$TMP/proj" && CCSWITCH_CLAUDE_HOME="$tabhome" PATH="$TMP/shim:$PATH" \
+	bash -c 'eval "$(ccswitch shell-init)" 2>/dev/null; claude' 2>/dev/null)
+check "tab home never runs claude" '[ -z "$out_tab" ]'
+rc_tab=$(cd "$TMP/proj" && CCSWITCH_CLAUDE_HOME="$tabhome" PATH="$TMP/shim:$PATH" \
+	bash -c 'eval "$(ccswitch shell-init)" 2>/dev/null; claude' >/dev/null 2>&1; echo $?)
+check "tab home wrapper refuses"  '[ "$rc_tab" = "2" ]'
+
+echo "== doctor --fix must converge, not claim a repair it did not make =="
+# Skipping a profile's missing claude/ half silently let --fix print success forever.
+rm -rf "$CCSWITCH_HOME/profiles/work/codex"
+check "half-deleted profile is broken" '[[ "$("$CC" doctor)" == *"not shared"* ]]'
+"$CC" doctor --fix >/dev/null
+check "doctor --fix converges"     '[[ "$("$CC" doctor)" == *"share config correctly"* ]]'
+check "codex half rebuilt"         '[ -L "$CCSWITCH_HOME/profiles/work/codex/config.toml" ]'
+
+echo "== a profile name that fails valid_name is not listed =="
+mkdir -p "$CCSWITCH_HOME/profiles/bad;name"
+lst=$("$CC" list)
+check "invalid name not listed"    '[[ "$lst" != *"bad;name"* ]]'
+check "doctor ignores it too"      '[[ "$("$CC" doctor)" != *"bad;name"* ]]'
+rm -rf "$CCSWITCH_HOME/profiles/bad;name"
 
 echo "== a stray file in profiles/ is not a profile =="
 # `ls -1` called it one, then link_shared died on `ln: .../README/claude/...: Not a directory` and

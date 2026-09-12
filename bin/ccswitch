@@ -25,9 +25,21 @@ warn() { printf 'ccswitch: %s\n' "$*" >&2; }
 # delete outside $PROFILES entirely. Refuse at startup instead: this is a trust boundary, same as
 # valid_name. Guards CCSWITCH_HOME too, which is safe today only because dst happens to be the last
 # field; that is not a property worth making load-bearing.
+# shell-init is exempt: it prints a static heredoc and touches no path. If it died here the
+# wrapper functions would never be DEFINED, and every directory in that shell - bound ones
+# included - would silently run the default account. Letting it through means the functions exist
+# and refuse properly at `ccswitch which` time, with exit 2.
+case "${1-}" in shell-init) ;; *)
 case "$CCSWITCH_HOME$CLAUDE_HOME$CODEX_REAL" in
-	*$'\t'* | *$'\n'*) die "a tab or newline in a ccswitch home path is not supported (CCSWITCH_HOME / CLAUDE_HOME / CODEX_HOME)" ;;
+	*$'\t'* | *$'\n'*)
+		# Exit 2, NOT die's 1. _ccswitch_exec reads 1 as "unbound, run the real binary", so
+		# dying here would launch a bound client repo on the default account - the very
+		# outcome resolve() fails closed to avoid. 2 is the wrapper's "refuse" code.
+		warn "a tab or newline in a ccswitch home path is not supported (CCSWITCH_HOME / CLAUDE_HOME / CODEX_HOME)"
+		exit 2
+		;;
 esac
+;; esac
 
 # Profile names land in filesystem paths and in argv, so validate before use. Rejects empty,
 # dot-leading (blocks . and ..), dash-leading (would be read as an option) and anything outside a
@@ -81,7 +93,11 @@ profile_names() {
 	for d in "$PROFILES"/*/; do
 		[ -d "$d" ] || continue          # no match: the glob stays literal
 		d=${d%/}
-		printf '%s\n' "${d##*/}"
+		d=${d##*/}
+		# Same stance as the home-path guard: a name with a tab or newline would ride into the
+		# encoding, and "dst is the last field" is not a property worth making load-bearing.
+		valid_name "$d" || continue
+		printf '%s\n' "$d"
 	done
 }
 
@@ -89,7 +105,7 @@ profile_names() {
 link_one() {
 	local src=$1 dst=$2
 	[ -e "$src" ] || return 0
-	[ -d "${dst%/*}" ] || return 0   # profile dir missing its claude/ or codex/ half: skip, not abort
+	mkdir -p "${dst%/*}" 2>/dev/null || return 0   # recreate a profile's missing claude/ or codex/ half
 	if [ -e "$dst" ] && [ ! -L "$dst" ]; then
 		warn "not linking $dst - a real file is already there (run 'ccswitch doctor' for details)"
 		return 0
