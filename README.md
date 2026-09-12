@@ -27,8 +27,8 @@ claude                       # runs as the acme account, here and in every subdi
 ```
 
 That's the whole setup, and it's once per account plus once per project. After it, you type
-`claude` and `codex` the way you always did. `stead` only comes back for a new profile or a
-diagnosis.
+`claude` and `codex` the way you always did. After that you only need `stead` for a new profile or
+when something looks wrong.
 
 | Command | |
 |---|---|
@@ -48,7 +48,7 @@ Only auth is separate. `CLAUDE.md`, `settings.json`, `settings.local.json`, `plu
 your full setup and you maintain it once. On the Codex side it's `config.toml`, `plugins` and
 `skills`.
 
-Two of those have consequences worth knowing before you rely on them.
+Two of them share more than you might want.
 
 `settings.local.json` is the file Claude Code writes when you pick "don't ask again". Shared, a
 permission you approve under the client account is approved under your personal one, and the other
@@ -58,42 +58,42 @@ approvals apart, drop it from `CLAUDE_SHARED` in `bin/stead`.
 `sessions` is the peer registry, which is how `/agents` and cross-session messaging find other
 sessions. Sharing it lets a session in one profile talk to a session in another. It opens no new
 read channel, since profiles separate accounts and not the filesystem, but message content does
-cross between accounts, so keep those messages task shaped.
+cross between accounts, so I keep those messages task shaped. I don't know yet what a long-lived
+pair of sessions does to that.
 
 MCP servers can't be symlinked at all. They live in `.claude.json`, the same file that holds the
 account, so sharing it would share the credentials. `stead add` copies them into a new profile
 instead and `stead sync-mcp` refreshes an existing one. That copy writes an allowlist of fields,
 `type`, `command`, `args` and `url`, and nothing else. Any server carrying something beyond those,
-or a url or argv shaped like it holds a credential, is refused by name so you can add it by hand. I
-would rather refuse a safe server than copy a secret between accounts, so the filter errs toward
-refusing.
+or a url or argv shaped like it holds a credential, is refused by name so you can add it by hand.
+The filter errs toward refusing, because a false refusal costs you one manual paste and a false copy
+moves a secret between accounts.
 
 ## Session names
 
 A session registers itself in the shared registry when it starts, and Claude Code names it after the
 directory. In a client repo that publishes the repo's name to your other accounts before `/title`
-could rename it. So a bound directory gets a neutral alias instead, `<profile>-<number>`, stable for
+can rename it. So a bound directory gets a neutral alias instead, `<profile>-<number>`, stable for
 that profile and directory. Set `CLAUDE_CODE_SESSION_NAME` yourself to override it.
 
-The record's `cwd` field still holds the real path. That's Claude Code's field rather than mine, and
-any profile could already read any other profile's directory, so hiding it in the registry would be
-theatre.
+The record's `cwd` field still holds the real path. Any profile could already read any other
+profile's directory, so hiding it in the registry would be theatre.
 
 ## What this doesn't do
 
 **Switch a running session.** The variables are read when the process launches, so a live session
 keeps the account it started with. Restart it.
 
-**Touch your credential store.** Nothing reads, writes or copies `.credentials.json`, and the
-keychain is never modified.
+**Touch your credential store.** Nothing reads or writes `.credentials.json`, and the keychain is
+never modified.
 
 **Work outside an interactive shell.** The wrapper is a shell function from your `~/.zshrc`. A
 `claude` launched by an IDE extension or a cron job may not get it, and would run on your default
 account. Check with `whence -w claude`, which should say `function`.
 
-## What I looked at first
+## Prior art
 
-Three tools already existed, and I read all of them before writing anything.
+Three tools already existed.
 
 [CCSwitcher](https://github.com/XueshiQiao/CCSwitcher) (Swift) writes the target account's token to
 the `Claude Code-credentials` keychain entry and overwrites the `oauthAccount` block in
@@ -108,12 +108,9 @@ what sent me looking for another approach, because one slot means one account fo
 and two terminals can't hold two. They also write to credential storage, which is a bad place to
 have a bug.
 
-None of the three mentions `CLAUDE_CONFIG_DIR`, and none binds an account to a directory. I'm
-grateful for all three anyway. They framed the problem and showed me the command surface people
-expect, and `stead` answers a different question with it: not which account I'm on, but which
-account this project uses.
-
-No code from any of them is here. This isn't a fork.
+None of the three mentions `CLAUDE_CONFIG_DIR`, and none binds an account to a directory. They did
+show me the command surface people expect, and I kept it. `stead` answers a different question with
+it: which account this project uses. None of their code is here.
 
 ## Contributing
 
