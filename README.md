@@ -1,7 +1,7 @@
 # stead
 
-One account per directory. A client repo runs on the client's Claude account, my own repo runs on
-mine, and I never log out of either. Two terminals can hold two accounts at the same time.
+One account per directory. A client repo runs on the client's Claude account, a personal repo runs
+on your own, and you never log out of either. Two terminals can hold two accounts at once.
 
 Claude Code reads `CLAUDE_CONFIG_DIR` and Codex reads `CODEX_HOME`. Point those at different
 directories and you get separate credentials with no shared slot to fight over. `stead` walks up
@@ -58,8 +58,8 @@ approvals apart, drop it from `CLAUDE_SHARED` in `bin/stead`.
 `sessions` is the peer registry, which is how `/agents` and cross-session messaging find other
 sessions. Sharing it lets a session in one profile talk to a session in another. It opens no new
 read channel, since profiles separate accounts and not the filesystem, but message content does
-cross between accounts, so I keep those messages task shaped. I don't know yet what a long-lived
-pair of sessions does to that.
+cross between accounts, so keep those messages task shaped. I don't know yet what a long-lived pair
+of sessions does to that.
 
 MCP servers can't be symlinked at all. They live in `.claude.json`, the same file that holds the
 account, so sharing it would share the credentials. `stead add` copies them into a new profile
