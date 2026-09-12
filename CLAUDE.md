@@ -20,7 +20,7 @@ The stack's `standards/biome.json` does **not** apply here. It's a shell project
 
 ```bash
 bash -n bin/stead && bash -n test.sh   # syntax
-./test.sh                                 # 150 assertions, must print "0 failed"
+./test.sh                                 # 155 assertions, must print "0 failed"
 shellcheck bin/stead test.sh hooks/*      # must be clean; CI runs it too
 ./hooks/pre-commit                        # all of the above in one gate
 ```
@@ -61,6 +61,12 @@ without passing pre-commit. All three failure modes are proven to exit non-zero,
 - `README.md` - install, the commands, and why the alternatives were rejected
 
 ## Gotchas
+
+- **Moving `$STEAD_HOME` orphans every login.** Claude Code keys the keychain entry on
+  `sha256(config dir)[:8]`, so a profile at a new path has no credential even though its
+  `.claude.json` still names the account. Cost an evening's confusion after renaming ccswitch to
+  stead. `doctor` reports it now; `needs_login` is the check, and it reports one way only because
+  an entry exists before a login succeeds, so presence proves nothing.
 
 - **`cmd | grep -q` under `set -o pipefail` scores a false failure.** grep exits at the first match,
   the writer takes SIGPIPE, the pipeline returns 141. Cost an hour of chasing a bug in `doctor` that

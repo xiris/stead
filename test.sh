@@ -432,6 +432,31 @@ check "add warns sync failed"      '[[ "$out" == *"mcp sync failed"* ]]'
 check "add still built the profile" '[ -L "$STEAD_HOME/profiles/pfail/claude/CLAUDE.md" ]'
 rm -rf "$STEAD_HOME/profiles/pfail"
 
+echo "== doctor spots a login orphaned by moving the profile ==" 
+# Claude Code keys a profile's keychain entry on a sha256 of its config dir, so moving the state
+# directory silently orphans every login while .claude.json still names the account. macOS only:
+# the check makes no claim where there is no keychain.
+if command -v security >/dev/null 2>&1 && command -v shasum >/dev/null 2>&1; then
+	python3 - <<'PY'
+import json, os
+p = os.environ["STEAD_HOME"] + "/profiles/work/claude/.claude.json"
+try: d = json.load(open(p))
+except Exception: d = {}
+d["oauthAccount"] = {"emailAddress": "orphan@example.com"}
+json.dump(d, open(p, "w"))
+PY
+	doc=$("$CC" doctor)
+	check "orphaned login reported"  '[[ "$doc" == *"no credential for this path"* ]]'
+	check "it names the account"     '[[ "$doc" == *"orphan@example.com"* ]]'
+	check "it names the fix"         '[[ "$doc" == *"stead login work"* ]]'
+	check "not called share-correct" '[[ "$doc" != *"share config correctly"* ]]'
+	python3 -c 'import json,os;p=os.environ["STEAD_HOME"]+"/profiles/work/claude/.claude.json";d=json.load(open(p));d.pop("oauthAccount",None);json.dump(d,open(p,"w"))'
+	check "clean once signed out"    '[[ "$("$CC" doctor)" == *"share config correctly"* ]]'
+else
+	ok "skipped: no keychain on this platform"
+	pass=$((pass+4))
+fi
+
 echo "== version, which is the first thing a bug report needs =="
 v=$("$CC" version)
 check "version prints a semver"   '[[ "$v" =~ stead\ [0-9]+\.[0-9]+\.[0-9]+ ]]'
