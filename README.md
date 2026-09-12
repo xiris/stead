@@ -33,7 +33,7 @@ until you opt a directory in.
 | `ccswitch list` | profiles, their accounts, which is active here |
 | `ccswitch which` | the profile governing the current directory |
 | `ccswitch run <name> <cmd>...` | run anything inside a profile |
-| `ccswitch doctor [--fix]` | check that profiles still share config |
+| `ccswitch doctor [--fix]` | check that profiles still share config, and flag risky MCP entries |
 | `ccswitch sync-mcp <name>` | copy your MCP servers into a profile |
 
 ## How it works

@@ -163,10 +163,8 @@ except Exception:
 # named, and a credential-shaped url or argv is refused too. Unrecognised means refused, never
 # copied - the same stance as valid_name. A wrong refusal costs one manual `claude mcp add`; a wrong
 # copy puts a client's token in a personal profile.
-cmd_sync_mcp() {
-	local name=${1-}
-	require_profile "$name"
-	command -v python3 >/dev/null 2>&1 || { warn "python3 not found - skipping mcp sync"; return 0; }
+mcp_guard() {   # <sync|audit> <source .claude.json> <profile .claude.json> <profile name>
+	command -v python3 >/dev/null 2>&1 || { warn "python3 not found - skipping mcp guard"; return 0; }
 	python3 -c '
 import json, math, os, re, sys, tempfile
 from collections import Counter
@@ -228,7 +226,22 @@ def why(c):
         return "neither a command nor a url to copy"
     return None
 
-src_p, dst_p, name = sys.argv[1], sys.argv[2], sys.argv[3]
+mode, src_p, dst_p, name = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+
+if mode == "audit":
+    # A profile synced by an older, looser guard keeps exactly what it was given. Nothing else
+    # looks inside .claude.json, so without this the only record of a bad entry is gone.
+    try:
+        held = json.load(open(dst_p)).get("mcpServers", {})
+    except Exception:
+        sys.exit(0)
+    if isinstance(held, dict):
+        for n in sorted(held):
+            r = why(held[n])
+            if r:
+                print("%s: mcp server %s - %s" % (name, n, r))
+    sys.exit(0)
+
 try:
     servers = json.load(open(src_p)).get("mcpServers", {})
 except Exception:
@@ -287,7 +300,13 @@ if refused:
     print("so a credential is never copied between accounts.")
 if copied:
     print("Restart any running session for this profile - it will otherwise overwrite this change.")
-' "$CLAUDE_JSON" "$PROFILES/$name/claude/.claude.json" "$name"
+' "$@"
+}
+
+cmd_sync_mcp() {
+	local name=${1-}
+	require_profile "$name"
+	mcp_guard sync "$CLAUDE_JSON" "$PROFILES/$name/claude/.claude.json" "$name"
 }
 
 cmd_add() {
@@ -384,7 +403,7 @@ cmd_login() {
 # A symlink replaced by a real file is the known failure mode: an atomic write (temp file + rename)
 # clobbers the link and silently unshares that config. Cheap to detect, cheap to repair.
 cmd_doctor() {
-	local name label src dst broken=0
+	local name label src dst broken=0 flagged=0 mcpbad
 	[ -d "$PROFILES" ] || { echo "No profiles yet."; return 0; }
 	while IFS= read -r name; do
 		while IFS=$'\t' read -r label src dst; do
@@ -394,9 +413,22 @@ cmd_doctor() {
 					"$([ -e "$dst" ] && echo 'a real file (no longer shared)' || echo 'missing')"
 			fi
 		done < <(each_shared "$name")
+		mcpbad=$(mcp_guard audit "" "$PROFILES/$name/claude/.claude.json" "$name" 2>/dev/null || true)
+		if [ -n "$mcpbad" ]; then
+			printf '%s\n' "$mcpbad"
+			flagged=$((flagged + $(printf '%s\n' "$mcpbad" | wc -l | tr -d ' ')))
+		fi
 	done < <(profile_names)
-	if [ "$broken" -eq 0 ]; then
+	if [ "$broken" -eq 0 ] && [ "$flagged" -eq 0 ]; then
 		echo "All profiles share config correctly."
+		return 0
+	fi
+	# Deliberately NOT folded into --fix: relinking cannot fix these, and a --fix that printed
+	# success over them would be the fabricated-repair bug this file already fixed once.
+	if [ "$flagged" -gt 0 ]; then
+		printf '\n%s\n' "$flagged mcp server(s) above would not pass the current copy guard. Remove and re-add them inside the profile: ccswitch run <profile> claude mcp add ..."
+	fi
+	if [ "$broken" -eq 0 ]; then
 		return 0
 	fi
 	printf '\n%s\n' "$broken link(s) not shared. Re-link with: ccswitch doctor --fix"

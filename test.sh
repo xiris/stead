@@ -341,6 +341,32 @@ leaked=$(grep -oE 'LEAK[A-Z]+' "$CCSWITCH_HOME/profiles/shapes/claude/.claude.js
 check "no secret reaches disk"     '[ -z "$leaked" ]'
 rm -rf "$CCSWITCH_HOME/profiles/shapes"
 
+echo "== doctor reports what an older, looser guard already put in a profile =="
+# sync-mcp refuses a bad SOURCE entry, but a profile synced by a looser version keeps what it got
+# and nothing else looks inside .claude.json. Same guard, so the two cannot drift apart.
+python3 - <<'PY'
+import json, os
+p = os.environ["CCSWITCH_HOME"] + "/profiles/work/claude/.claude.json"
+try: d = json.load(open(p))
+except Exception: d = {}
+d.setdefault("mcpServers", {})["stale"] = {"type": "stdio", "command": "uvx",
+    "args": ["postgres-mcp", "postgresql://app:LEGACYLEAK@db.internal:5432/prod"]}
+json.dump(d, open(p, "w"))
+PY
+doc=$("$CC" doctor)
+check "doctor flags the stale entry" '[[ "$doc" == *"work: mcp server stale"* ]]'
+check "doctor names the reason"     '[[ "$doc" == *"embedded username and password"* ]]'
+check "not called share-correct"    '[[ "$doc" != *"share config correctly"* ]]'
+check "tells the user what to do"   '[[ "$doc" == *"claude mcp add"* ]]'
+# It must NOT be folded into --fix: relinking cannot remove it, and claiming otherwise is the
+# fabricated-repair bug this file already fixed once.
+"$CC" doctor --fix >/dev/null 2>&1 || true
+still=$(python3 -c 'import json,os;print("stale" in json.load(open(os.environ["CCSWITCH_HOME"]+"/profiles/work/claude/.claude.json")).get("mcpServers",{}))')
+check "--fix does not touch mcp"    '[ "$still" = "True" ]'
+check "doctor still flags after fix" '[[ "$("$CC" doctor)" == *"mcp server stale"* ]]'
+python3 -c 'import json,os;p=os.environ["CCSWITCH_HOME"]+"/profiles/work/claude/.claude.json";d=json.load(open(p));d["mcpServers"].pop("stale");json.dump(d,open(p,"w"))'
+check "doctor clean once removed"   '[[ "$("$CC" doctor)" == *"share config correctly"* ]]'
+
 echo "== add survives python3 itself failing =="
 # The || warn safety net had no coverage: every malformed source was handled INSIDE python, so it
 # exited 0 and the branch never ran.
