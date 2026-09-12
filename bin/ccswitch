@@ -19,7 +19,14 @@ MARKER=".ccswitch"
 # resolve today because the commands are absolute paths; sharing the directory means a hook written
 # with a relative path does not silently stop firing inside a profile.
 # settings.local.json: the permissions allowlist. Unshared, a profile re-prompts for everything.
-CLAUDE_SHARED=(CLAUDE.md settings.json settings.local.json plugins skills agents commands hooks)
+# sessions: the peer registry. Claude Code writes <pid>.json + a <pid>.<id>.key here and discovers
+# other sessions by reading it, so an unshared one makes sessions in different profiles invisible to
+# ListAgents and SendMessage even though the transport - /tmp/cc-socks/<pid>.sock - is already
+# global. Sharing it opens no NEW read channel: profiles isolate accounts, not the filesystem, and
+# any session can already read another profile's directory. What it does enable is message CONTENT
+# crossing between accounts, which is the boundary worth minding - keep messages task-shaped, and
+# name sessions neutrally, because a derived name is the directory name.
+CLAUDE_SHARED=(CLAUDE.md settings.json settings.local.json plugins skills agents commands hooks sessions)
 CODEX_SHARED=(config.toml plugins skills)
 
 die()  { printf 'ccswitch: %s\n' "$*" >&2; exit 1; }

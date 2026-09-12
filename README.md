@@ -47,6 +47,14 @@ Only auth is separated. `CLAUDE.md`, `settings.json`, `settings.local.json`, `pl
 `agents`, `commands` and `hooks` are symlinked back to `~/.claude`, so every profile has your full
 setup and you maintain it once. On the Codex side it is `config.toml`, `plugins` and `skills`.
 
+Sessions are shared too, which is what lets `ListAgents` and `SendMessage` reach a session running
+under a different profile. Claude Code discovers peers by reading `sessions/` inside the config dir,
+so an unshared one makes two accounts invisible to each other even though the socket they would talk
+over is already global. Sharing it opens no new read channel - profiles isolate accounts, not the
+filesystem - but it does let message *content* cross between accounts, so keep messages task-shaped.
+A session's default name is derived from its directory, so name client sessions yourself if the
+directory name is the thing you would rather not publish to your other accounts.
+
 Sharing cuts both ways on one file. `settings.local.json` is what Claude Code writes when you pick
 "don't ask again", so a permission you approve under the client account is approved under your
 personal one too, and the reverse. That is the intended trade - unshared, every profile re-prompts

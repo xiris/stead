@@ -19,7 +19,7 @@ The stack's `standards/biome.json` does **not** apply here. It's a shell project
 
 ```bash
 bash -n bin/ccswitch && bash -n test.sh   # syntax
-./test.sh                                 # 127 assertions, must print "0 failed"
+./test.sh                                 # 129 assertions, must print "0 failed"
 shellcheck bin/ccswitch test.sh           # optional - not installed on this machine
 ```
 

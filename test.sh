@@ -10,7 +10,7 @@ export CCSWITCH_HOME="$TMP/state"
 export CCSWITCH_CLAUDE_HOME="$TMP/fake-claude"
 export CCSWITCH_CODEX_HOME="$TMP/fake-codex"
 export CCSWITCH_CLAUDE_JSON="$TMP/fake-claude.json"
-mkdir -p "$CCSWITCH_CLAUDE_HOME/plugins" "$CCSWITCH_CODEX_HOME/skills" "$CCSWITCH_CODEX_HOME/plugins"
+mkdir -p "$CCSWITCH_CLAUDE_HOME/plugins" "$CCSWITCH_CODEX_HOME/skills" "$CCSWITCH_CODEX_HOME/plugins" "$CCSWITCH_CLAUDE_HOME/sessions"
 echo "GLOBAL AGREEMENT" >"$CCSWITCH_CLAUDE_HOME/CLAUDE.md"
 echo '{"a":1}' >"$CCSWITCH_CLAUDE_HOME/settings.json"
 echo "plugin" >"$CCSWITCH_CLAUDE_HOME/plugins/p.txt"
@@ -57,6 +57,11 @@ check "plugins dir shared"        '[ -L "$CCSWITCH_HOME/profiles/work/claude/plu
 check "hooks dir shared"          '[ -L "$CCSWITCH_HOME/profiles/work/claude/hooks" ]'
 check "hook script readable"      '[ -f "$CCSWITCH_HOME/profiles/work/claude/hooks/gate.sh" ]'
 check "local permissions shared"  '[ -L "$CCSWITCH_HOME/profiles/work/claude/settings.local.json" ]'
+check "session registry shared"   '[ -L "$CCSWITCH_HOME/profiles/work/claude/sessions" ]'
+# The point of sharing it: one registry, so a session in a profile is discoverable from outside it.
+echo '{"pid":424242,"name":"probe"}' >"$CCSWITCH_HOME/profiles/work/claude/sessions/probe.json"
+check "peers land in one registry" '[ -f "$CCSWITCH_CLAUDE_HOME/sessions/probe.json" ]'
+rm -f "$CCSWITCH_CLAUDE_HOME/sessions/probe.json"
 check "codex config shared"       '[ -L "$CCSWITCH_HOME/profiles/work/codex/config.toml" ]'
 check "codex skills shared"       '[ -L "$CCSWITCH_HOME/profiles/work/codex/skills" ]'
 check "codex plugins shared"      '[ -L "$CCSWITCH_HOME/profiles/work/codex/plugins" ]'
