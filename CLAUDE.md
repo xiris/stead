@@ -19,8 +19,9 @@ The stack's `standards/biome.json` does **not** apply here. It's a shell project
 
 ```bash
 bash -n bin/stead && bash -n test.sh   # syntax
-./test.sh                                 # 143 assertions, must print "0 failed"
-shellcheck bin/stead test.sh              # must be clean; CI runs it too
+./test.sh                                 # 150 assertions, must print "0 failed"
+shellcheck bin/stead test.sh hooks/*      # must be clean; CI runs it too
+./hooks/pre-commit                        # all of the above in one gate
 ```
 
 **Known environment failures:** none. `test.sh` touches nothing outside its `mktemp -d`.
@@ -45,6 +46,14 @@ Four facts carry the whole design. Violating any of them breaks the premise.
 - **Profile names become filesystem paths.** `valid_name` is a trust boundary, and so is the
   content of a `.stead` marker, which is an attacker-writable file in a cloned repo. Both are
   validated. Do not add a code path that skips it.
+
+## Hooks
+
+`git config core.hooksPath hooks` once per clone. `hooks/pre-commit` runs syntax, shellcheck and the
+suite under `/bin/bash`, and `pre-push` runs the same gate because a commit can reach a branch
+without passing pre-commit. All three failure modes are proven to exit non-zero, not assumed.
+
+`--no-verify` is allowed by the working agreement. Say which check you skipped and why.
 
 ## Docs that matter
 

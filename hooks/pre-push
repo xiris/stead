@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# The same gate, because a commit can reach a branch without passing pre-commit
+# (a merge, a rebase, --no-verify, or a commit made before hooks were enabled).
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+exec hooks/pre-commit

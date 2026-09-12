@@ -432,6 +432,17 @@ check "add warns sync failed"      '[[ "$out" == *"mcp sync failed"* ]]'
 check "add still built the profile" '[ -L "$STEAD_HOME/profiles/pfail/claude/CLAUDE.md" ]'
 rm -rf "$STEAD_HOME/profiles/pfail"
 
+echo "== version, which is the first thing a bug report needs =="
+v=$("$CC" version)
+check "version prints a semver"   '[[ "$v" =~ stead\ [0-9]+\.[0-9]+\.[0-9]+ ]]'
+check "version reports bash"      '[[ "$v" == *bash* ]]'
+check "version reports platform"  '[[ "$v" == *"$(uname -s)"* ]]'
+check "version reports the home"  '[[ "$v" == *"$STEAD_HOME"* ]]'
+check "--version is the same"     '[ "$("$CC" --version)" = "$v" ]'
+check "-V is the same"            '[ "$("$CC" -V)" = "$v" ]'
+# It must work with no profiles and no state at all, which is when a reporter runs it.
+check "version needs no state"    'STEAD_HOME="$TMP/nothing-here" "$CC" version >/dev/null 2>&1'
+
 echo "== unuse =="
 ( cd "$TMP/proj" && "$CC" unuse >/dev/null )
 check "marker removed"            '[ ! -f "$TMP/proj/.stead" ]'

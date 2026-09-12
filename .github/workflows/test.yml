@@ -5,24 +5,42 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   test:
-    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # macOS is the platform this is built for and ships bash 3.2.
+        # Linux is here because nothing in stead touches the keychain, so it
+        # should work there. Without this job that is belief rather than fact.
+        os: [macos-latest, macos-15, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  # v5.0.0
 
       - name: Syntax
         run: bash -n bin/stead && bash -n test.sh
 
       # macOS ships bash 3.2, so that is the version the tool has to run on.
-      # The homebrew bash that `bash` resolves to would hide a 3.2-only break.
-      - name: Suite on bash 3.2
+      # The runner default bash would hide a 3.2-only break.
+      - name: Suite on /bin/bash
         run: /bin/bash ./test.sh
 
-      - name: Suite on the runner default bash
+      - name: Suite on the default bash
         run: ./test.sh
 
       - name: Shellcheck
         run: |
-          brew install shellcheck
-          shellcheck bin/stead test.sh
+          if command -v shellcheck >/dev/null 2>&1; then :
+          elif command -v apt-get >/dev/null 2>&1; then sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
+          else brew install shellcheck
+          fi
+          shellcheck bin/stead test.sh hooks/pre-commit hooks/pre-push
+
+      - name: Hooks must gate
+        run: |
+          git config core.hooksPath hooks
+          ./hooks/pre-commit

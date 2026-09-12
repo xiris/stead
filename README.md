@@ -40,6 +40,7 @@ when something looks wrong.
 | `stead run <name> <cmd>...` | run anything inside a profile |
 | `stead sync-mcp <name>` | copy your MCP servers into a profile |
 | `stead doctor [--fix]` | check that profiles still share config |
+| `stead version` | versions and paths, for a bug report |
 
 ## What a profile shares
 
@@ -117,9 +118,17 @@ it: which account this project uses. None of their code is here.
 The test suite is plain bash and runs in a temp directory:
 
 ```bash
+git config core.hooksPath hooks   # once per clone
+./hooks/pre-commit                # syntax, shellcheck, and the suite under bash 3.2
+```
+
+That's the same gate CI runs. If you'd rather run the pieces:
+
+```bash
 bash -n bin/stead && bash -n test.sh
-./test.sh          # must print "0 failed"
-/bin/bash ./test.sh   # macOS ships bash 3.2, so it has to pass there too
+shellcheck bin/stead test.sh hooks/*
+./test.sh            # must print "0 failed"
+/bin/bash ./test.sh  # macOS ships bash 3.2, so it has to pass there too
 ```
 
 Profile names and `.stead` contents both become filesystem paths, so `valid_name` is a trust

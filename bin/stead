@@ -13,6 +13,7 @@ CODEX_REAL="${STEAD_CODEX_HOME:-$HOME/.codex}"
 # Sibling of $CLAUDE_HOME, not inside it: Claude Code keeps .claude.json next to ~/.claude.
 CLAUDE_JSON="${STEAD_CLAUDE_JSON:-$HOME/.claude.json}"
 MARKER=".stead"
+VERSION="0.1.0"
 
 # Shared back to the real home. Auth state is deliberately absent: that is the whole point.
 # hooks: the DEFINITIONS live in settings.json, but the scripts they name live here. They happen to
@@ -454,6 +455,15 @@ cmd_login() {
 
 # A symlink replaced by a real file is the known failure mode: an atomic write (temp file + rename)
 # clobbers the link and silently unshares that config. Cheap to detect, cheap to repair.
+cmd_version() {
+	printf 'stead %s\n' "$VERSION"
+	printf '  bash     %s\n' "${BASH_VERSION:-unknown}"
+	printf '  platform %s %s\n' "$(uname -s)" "$(uname -r)"
+	printf '  claude   %s\n' "$(command -v claude >/dev/null 2>&1 && claude --version 2>/dev/null | head -1 || echo 'not on PATH')"
+	printf '  codex    %s\n' "$(command -v codex >/dev/null 2>&1 && codex --version 2>/dev/null | head -1 || echo 'not on PATH')"
+	printf '  home     %s\n' "$STEAD_HOME"
+}
+
 cmd_doctor() {
 	local name label src dst broken=0 flagged=0 mcpbad
 	[ -d "$PROFILES" ] || { echo "No profiles yet."; return 0; }
@@ -536,6 +546,7 @@ stead - bind a Claude Code / Codex account to a directory
   stead which                   the profile governing the current directory
   stead run <name> <cmd>...     run any command inside a profile
   stead doctor [--fix]          check that profiles still share config
+  stead version                    versions and paths, for a bug report
   stead sync-mcp <name>         copy your MCP servers into a profile (allowlisted fields only)
 
 Shell integration (zsh/bash) - makes `claude` and `codex` follow the directory:
@@ -556,6 +567,7 @@ main() {
 		which) cmd_which "$@" ;;
 		run) cmd_run "$@" ;;
 		doctor) cmd_doctor "$@" ;;
+		version | --version | -V) cmd_version ;;
 		sync-mcp) cmd_sync_mcp "$@" ;;
 		shell-init) cmd_shell_init "$@" ;;
 		'' | -h | --help | help) usage ;;

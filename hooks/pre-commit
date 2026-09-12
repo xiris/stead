@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# Green before the commit exists, rather than after someone notices.
+# Enable with:  git config core.hooksPath hooks
+# Skip once with: git commit --no-verify   (say which check you skipped and why)
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+
+fail() { printf '\npre-commit: %s\n' "$*" >&2; exit 1; }
+
+bash -n bin/stead || fail "bin/stead has a syntax error"
+bash -n test.sh   || fail "test.sh has a syntax error"
+
+if command -v shellcheck >/dev/null 2>&1; then
+	shellcheck bin/stead test.sh || fail "shellcheck found something"
+else
+	printf 'pre-commit: shellcheck not installed, skipping (brew install shellcheck)\n' >&2
+fi
+
+# macOS ships bash 3.2 and that is what this has to run on, so prefer it when it is there.
+if [ -x /bin/bash ]; then /bin/bash ./test.sh >/dev/null || fail "the suite failed under /bin/bash"
+else ./test.sh >/dev/null || fail "the suite failed"; fi
+
+printf 'pre-commit: syntax, shellcheck and %s assertions clean\n' "$(./test.sh 2>/dev/null | awk '/passed,/{print $1}')"
