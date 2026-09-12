@@ -34,6 +34,7 @@ until you opt a directory in.
 | `ccswitch which` | the profile governing the current directory |
 | `ccswitch run <name> <cmd>...` | run anything inside a profile |
 | `ccswitch doctor [--fix]` | check that profiles still share config |
+| `ccswitch sync-mcp <name>` | copy your MCP servers into a profile |
 
 ## How it works
 
@@ -52,9 +53,11 @@ personal one too, and the reverse. That is the intended trade - unshared, every 
 for everything you have already allowed. If you want approvals isolated per client, drop
 `settings.local.json` from `CLAUDE_SHARED` in `bin/ccswitch`.
 
-One thing cannot be shared: **user-scoped MCP servers**. They live in `.claude.json`, the same file
-that holds the account, so sharing it would share the credentials and defeat the whole design. Add
-them per profile with `ccswitch run <name> claude mcp add ...`.
+One thing cannot be symlinked: **user-scoped MCP servers**. They live in `.claude.json`, the same
+file that holds the account, so sharing it would share the credentials and defeat the whole design.
+`ccswitch add` copies them into a new profile instead, and `ccswitch sync-mcp <name>` refreshes an
+existing one. That moves configuration only: any server whose `env` or `headers` block could hold a
+token is refused and named, for you to add by hand. Restart a session to pick up new servers.
 
 ## What this does not do
 

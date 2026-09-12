@@ -10,6 +10,8 @@ CCSWITCH_HOME="${CCSWITCH_HOME:-$HOME/.ccswitch}"
 PROFILES="$CCSWITCH_HOME/profiles"
 CLAUDE_HOME="${CCSWITCH_CLAUDE_HOME:-$HOME/.claude}"
 CODEX_REAL="${CCSWITCH_CODEX_HOME:-$HOME/.codex}"
+# Sibling of $CLAUDE_HOME, not inside it: Claude Code keeps .claude.json next to ~/.claude.
+CLAUDE_JSON="${CCSWITCH_CLAUDE_JSON:-$HOME/.claude.json}"
 MARKER=".ccswitch"
 
 # Shared back to the real home. Auth state is deliberately absent: that is the whole point.
@@ -152,12 +154,61 @@ except Exception:
     print("")' "$PROFILES/$1/claude/.claude.json" 2>/dev/null || true
 }
 
+# MCP servers are the one thing that cannot join CLAUDE_SHARED. They live in .claude.json, the same
+# file that holds oauthAccount, so symlinking it would share the credentials and defeat the tool.
+# Copying just the mcpServers key moves config, not secrets: entries are {type,command,args,env} or
+# {type,url}. An env or headers block CAN hold a token, so those are REFUSED rather than copied -
+# "we never copy a token" is the premise, and quietly copying one would break it for a convenience.
+cmd_sync_mcp() {
+	local name=${1-}
+	require_profile "$name"
+	command -v python3 >/dev/null 2>&1 || { warn "python3 not found - skipping mcp sync"; return 0; }
+	python3 -c '
+import json, os, sys, tempfile
+src_p, dst_p, name = sys.argv[1], sys.argv[2], sys.argv[3]
+try:
+    servers = json.load(open(src_p)).get("mcpServers", {})
+except Exception:
+    sys.stderr.write("ccswitch: no readable %s - skipping mcp sync\n" % src_p)
+    sys.exit(0)
+if not servers:
+    print("No user-scoped MCP servers to copy.")
+    sys.exit(0)
+try:
+    dst = json.load(open(dst_p))
+except Exception:
+    dst = {}
+cur = dst.get("mcpServers", {})
+copied, kept, refused = [], [], []
+for n in sorted(servers):
+    c = servers[n]
+    if c.get("env") or c.get("headers"):
+        refused.append(n)
+    elif n in cur:
+        kept.append(n)
+    else:
+        cur[n] = c
+        copied.append(n)
+if copied:
+    dst["mcpServers"] = cur
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(dst_p) or ".")
+    with os.fdopen(fd, "w") as f:
+        json.dump(dst, f, indent=2)
+    os.replace(tmp, dst_p)
+for n in copied:  print("  + %s" % n)
+for n in kept:    print("  = %s (already in profile)" % n)
+for n in refused: print("  ! %s (has env/headers that may hold a secret - add it by hand)" % n)
+print("%s: %d copied, %d already there, %d refused" % (name, len(copied), len(kept), len(refused)))
+' "$CLAUDE_JSON" "$PROFILES/$name/claude/.claude.json" "$name"
+}
+
 cmd_add() {
 	local name=${1-}
 	valid_name "$name" || die "usage: ccswitch add <name>   (letters, digits, . _ -)"
 	[ -d "$PROFILES/$name" ] && die "profile '$name' already exists"
 	mkdir -p "$PROFILES/$name/claude" "$PROFILES/$name/codex"
 	link_shared "$name"
+	cmd_sync_mcp "$name"
 	cat <<EOF
 Created profile '$name'. It shares your config and starts signed out.
 
@@ -308,6 +359,7 @@ ccswitch - bind a Claude Code / Codex account to a directory
   ccswitch which                   the profile governing the current directory
   ccswitch run <name> <cmd>...     run any command inside a profile
   ccswitch doctor [--fix]          check that profiles still share config
+  ccswitch sync-mcp <name>         copy your MCP servers into a profile (config only, never a token)
 
 Shell integration (zsh/bash) - makes `claude` and `codex` follow the directory:
 
@@ -327,6 +379,7 @@ main() {
 		which) cmd_which "$@" ;;
 		run) cmd_run "$@" ;;
 		doctor) cmd_doctor "$@" ;;
+		sync-mcp) cmd_sync_mcp "$@" ;;
 		shell-init) cmd_shell_init "$@" ;;
 		'' | -h | --help | help) usage ;;
 		*) usage >&2; die "unknown command: $cmd" ;;

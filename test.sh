@@ -9,6 +9,7 @@ trap 'rm -rf "$TMP"' EXIT
 export CCSWITCH_HOME="$TMP/state"
 export CCSWITCH_CLAUDE_HOME="$TMP/fake-claude"
 export CCSWITCH_CODEX_HOME="$TMP/fake-codex"
+export CCSWITCH_CLAUDE_JSON="$TMP/fake-claude.json"
 mkdir -p "$CCSWITCH_CLAUDE_HOME/plugins" "$CCSWITCH_CODEX_HOME/skills" "$CCSWITCH_CODEX_HOME/plugins"
 echo "GLOBAL AGREEMENT" >"$CCSWITCH_CLAUDE_HOME/CLAUDE.md"
 echo '{"a":1}' >"$CCSWITCH_CLAUDE_HOME/settings.json"
@@ -18,6 +19,13 @@ mkdir -p "$CCSWITCH_CLAUDE_HOME/hooks"
 echo "#!/bin/sh" >"$CCSWITCH_CLAUDE_HOME/hooks/gate.sh"
 echo '{"permissions":{"allow":["Bash(ls:*)"]}}' >"$CCSWITCH_CLAUDE_HOME/settings.local.json"
 echo "codex skill" >"$CCSWITCH_CODEX_HOME/skills/s.txt"
+cat >"$CCSWITCH_CLAUDE_JSON" <<'JSON'
+{"oauthAccount":{"emailAddress":"real@example.com"},
+ "mcpServers":{"plain-http":{"type":"http","url":"https://example.test/mcp"},
+               "plain-stdio":{"type":"stdio","command":"/bin/echo","args":[],"env":{}},
+               "has-secret":{"type":"stdio","command":"/bin/echo","env":{"API_KEY":"sk-live-xxx"}},
+               "has-headers":{"type":"http","url":"https://x.test","headers":{"Authorization":"Bearer t"}}}}
+JSON
 
 pass=0 fail=0
 ok()  { pass=$((pass+1)); printf '  ok   %s\n' "$1"; }
@@ -238,6 +246,37 @@ rc=0; "$CC" doctor --fix >/dev/null 2>&1 || rc=$?
 check "--fix survives stray"      '[ "$rc" -eq 0 ]'
 check "--fix still repaired work" '[ -L "$CCSWITCH_HOME/profiles/work/claude/settings.json" ]'
 rm -rf "$CCSWITCH_HOME/profiles/README" "$CCSWITCH_HOME/profiles/halfbuilt"
+
+echo "== sync-mcp copies config and refuses anything that may hold a token ==" 
+# MCP servers cannot be symlinked - they live in .claude.json next to oauthAccount.
+mcp_of() { python3 -c 'import json,sys
+try: print(" ".join(sorted(json.load(open(sys.argv[1])).get("mcpServers",{}))))
+except Exception: print("")' "$CCSWITCH_HOME/profiles/$1/claude/.claude.json"; }
+"$CC" add synced >/dev/null
+check "add copies safe servers"   '[ "$(mcp_of synced)" = "plain-http plain-stdio" ]'
+check "env block NOT copied"      '[[ "$(mcp_of synced)" != *has-secret* ]]'
+check "headers block NOT copied"  '[[ "$(mcp_of synced)" != *has-headers* ]]'
+secret_leaked=$(grep -c 'sk-live-xxx' "$CCSWITCH_HOME/profiles/synced/claude/.claude.json" 2>/dev/null || true)
+check "no secret written to disk" '[ "$secret_leaked" = "0" ]'
+out=$("$CC" sync-mcp synced)
+check "sync-mcp is idempotent"    '[ "$(mcp_of synced)" = "plain-http plain-stdio" ]'
+check "sync-mcp reports refusals" '[[ "$out" == *"may hold a secret"* ]]'
+
+# It must never clobber a server the profile already defines, nor the profile's own account.
+python3 - <<'PY'
+import json, os
+p = os.environ["CCSWITCH_HOME"] + "/profiles/synced/claude/.claude.json"
+d = json.load(open(p))
+d["oauthAccount"] = {"emailAddress": "profile@example.com"}
+d["mcpServers"]["plain-http"] = {"type": "http", "url": "https://PROFILE-OWN/mcp"}
+json.dump(d, open(p, "w"))
+PY
+"$CC" sync-mcp synced >/dev/null
+own=$(python3 -c 'import json,os;d=json.load(open(os.environ["CCSWITCH_HOME"]+"/profiles/synced/claude/.claude.json"));print(d["mcpServers"]["plain-http"]["url"], d["oauthAccount"]["emailAddress"])')
+check "does not clobber own entry" '[[ "$own" == *"PROFILE-OWN"* ]]'
+check "does not touch the account" '[[ "$own" == *"profile@example.com"* ]]'
+check "sync-mcp refuses unknown"  '! "$CC" sync-mcp ghost >/dev/null 2>&1'
+rm -rf "$CCSWITCH_HOME/profiles/synced"
 
 echo "== unuse =="
 ( cd "$TMP/proj" && "$CC" unuse >/dev/null )
