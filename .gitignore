@@ -1,2 +1,5 @@
 .stead
 .DS_Store
+
+# Session handoffs are local. They are session state, not documentation.
+docs/HANDOFF.md

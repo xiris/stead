@@ -3,7 +3,8 @@
 Binds a Claude Code / Codex account to a directory, so a client repo uses the client account and a
 personal repo uses mine, with no switching and no logging out.
 
-> Global working agreement (the loop, review, memory, handoff) is in `~/.claude/CLAUDE.md`.
+> The maintainer's global working agreement lives in `~/.claude/CLAUDE.md`, outside this repo.
+> You don't need it to contribute. This file holds what is specific to stead.
 > This file holds only what's specific to THIS project. Where they conflict, this file wins.
 
 ## Stack
