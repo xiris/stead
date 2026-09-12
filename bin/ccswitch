@@ -19,6 +19,16 @@ CODEX_SHARED=(config.toml plugins skills)
 die()  { printf 'ccswitch: %s\n' "$*" >&2; exit 1; }
 warn() { printf 'ccswitch: %s\n' "$*" >&2; }
 
+# each_shared encodes paths into tab-separated fields, so a tab or newline in any of these roots
+# splits one entry into two and hands a consumer a path it never built. That consumer includes a
+# `rm -rf` loop, and the mis-parsed path is RELATIVE, so it resolves against the user's cwd - a
+# delete outside $PROFILES entirely. Refuse at startup instead: this is a trust boundary, same as
+# valid_name. Guards CCSWITCH_HOME too, which is safe today only because dst happens to be the last
+# field; that is not a property worth making load-bearing.
+case "$CCSWITCH_HOME$CLAUDE_HOME$CODEX_REAL" in
+	*$'\t'* | *$'\n'*) die "a tab or newline in a ccswitch home path is not supported (CCSWITCH_HOME / CLAUDE_HOME / CODEX_HOME)" ;;
+esac
+
 # Profile names land in filesystem paths and in argv, so validate before use. Rejects empty,
 # dot-leading (blocks . and ..), dash-leading (would be read as an option) and anything outside a
 # conservative charset.
@@ -63,10 +73,23 @@ resolve() {
 	done
 }
 
+# A profile is a directory under $PROFILES. Anything else in there (a stray README, a .DS_Store)
+# is not one: `ls -1` used to hand those to link_shared, which aborted the entire --fix run on the
+# first `ln: .../README/claude/CLAUDE.md: Not a directory` and left real breaks unrepaired.
+profile_names() {
+	local d
+	for d in "$PROFILES"/*/; do
+		[ -d "$d" ] || continue          # no match: the glob stays literal
+		d=${d%/}
+		printf '%s\n' "${d##*/}"
+	done
+}
+
 # ln -sfn: -n keeps a directory symlink from being followed into on relink.
 link_one() {
 	local src=$1 dst=$2
 	[ -e "$src" ] || return 0
+	[ -d "${dst%/*}" ] || return 0   # profile dir missing its claude/ or codex/ half: skip, not abort
 	if [ -e "$dst" ] && [ ! -L "$dst" ]; then
 		warn "not linking $dst - a real file is already there (run 'ccswitch doctor' for details)"
 		return 0
@@ -129,7 +152,7 @@ cmd_list() {
 	here=$(resolve) || rc=$?
 	[ -d "$PROFILES" ] || { echo "No profiles yet. Create one with: ccswitch add <name>"; return 0; }
 	printf '%-16s %-34s %-7s %s\n' PROFILE CLAUDE CODEX ''
-	for name in $(ls -1 "$PROFILES" 2>/dev/null); do
+	while IFS= read -r name; do
 		acct=$(claude_account "$name")
 		mark=''
 		[ "$name" = "$here" ] && mark='<- active here'
@@ -137,7 +160,7 @@ cmd_list() {
 			"$name" "${acct:-signed out}" \
 			"$([ -f "$PROFILES/$name/codex/auth.json" ] && echo 'authed' || echo '-')" \
 			"$mark"
-	done
+	done < <(profile_names)
 	if [ "$rc" -eq 2 ]; then
 		printf '\n%s\n' "This directory's $MARKER is unusable (see the warning above) - claude and codex refuse to run here until it is fixed."
 	elif [ -z "$here" ]; then
@@ -204,7 +227,7 @@ cmd_login() {
 cmd_doctor() {
 	local name label src dst broken=0
 	[ -d "$PROFILES" ] || { echo "No profiles yet."; return 0; }
-	for name in $(ls -1 "$PROFILES" 2>/dev/null); do
+	while IFS= read -r name; do
 		while IFS=$'\t' read -r label src dst; do
 			if [ ! -L "$dst" ]; then
 				broken=$((broken + 1))
@@ -212,19 +235,19 @@ cmd_doctor() {
 					"$([ -e "$dst" ] && echo 'a real file (no longer shared)' || echo 'missing')"
 			fi
 		done < <(each_shared "$name")
-	done
+	done < <(profile_names)
 	if [ "$broken" -eq 0 ]; then
 		echo "All profiles share config correctly."
 		return 0
 	fi
 	printf '\n%s\n' "$broken link(s) not shared. Re-link with: ccswitch doctor --fix"
 	if [ "${1-}" = "--fix" ]; then
-		for name in $(ls -1 "$PROFILES" 2>/dev/null); do
+		while IFS= read -r name; do
 			while IFS=$'\t' read -r label src dst; do
 				[ -L "$dst" ] || rm -rf "$dst"
 			done < <(each_shared "$name")
 			link_shared "$name"
-		done
+		done < <(profile_names)
 		echo "Re-linked. Anything that was overwritten in a profile is gone; the shared copy wins."
 	fi
 	return 0

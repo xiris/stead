@@ -179,6 +179,34 @@ echo ".ccswitch" >"$TMP/proj/.gitignore"
 out=$(cd "$TMP/proj" && "$CC" use work)
 check "silent when ignored"       '[[ "$out" != *"not gitignored"* ]]'
 
+echo "== a tab or newline in a home path is refused at startup =="
+# The tab-separated encoding would split one entry in two and hand the rm -rf loop a RELATIVE dst,
+# which resolves against the user's cwd - a delete outside $PROFILES entirely. Fail closed instead.
+tabhome="$TMP/cl$(printf '\t')aude"
+mkdir -p "$tabhome"
+rc=0; out=$(CCSWITCH_CLAUDE_HOME="$tabhome" "$CC" doctor 2>&1) || rc=$?
+check "tab in home refused"       '[ "$rc" -ne 0 ]'
+check "tab refusal explains why"  '[[ "$out" == *"tab or newline"* ]]'
+rc=0; out=$(CCSWITCH_HOME="$TMP/st$(printf '\t')ate" "$CC" list 2>&1) || rc=$?
+check "tab in CCSWITCH_HOME too"  '[ "$rc" -ne 0 ]'
+
+echo "== a stray file in profiles/ is not a profile =="
+# `ls -1` called it one, then link_shared died on `ln: .../README/claude/...: Not a directory` and
+# every profile sorting after it went unrepaired.
+touch "$CCSWITCH_HOME/profiles/README"
+mkdir -p "$CCSWITCH_HOME/profiles/halfbuilt"          # a dir with no claude/ or codex/ half
+rm "$CCSWITCH_HOME/profiles/work/claude/settings.json"
+echo '{"clobbered":3}' >"$CCSWITCH_HOME/profiles/work/claude/settings.json"
+rc=0; out=$("$CC" doctor 2>&1) || rc=$?
+check "doctor survives stray"     '[ "$rc" -eq 0 ]'
+check "stray not called a profile" '[[ "$out" != *"README"* ]]'
+lst=$("$CC" list)
+check "stray absent from list"    '[[ "$lst" != *README* ]]'
+rc=0; "$CC" doctor --fix >/dev/null 2>&1 || rc=$?
+check "--fix survives stray"      '[ "$rc" -eq 0 ]'
+check "--fix still repaired work" '[ -L "$CCSWITCH_HOME/profiles/work/claude/settings.json" ]'
+rm -rf "$CCSWITCH_HOME/profiles/README" "$CCSWITCH_HOME/profiles/halfbuilt"
+
 echo "== unuse =="
 ( cd "$TMP/proj" && "$CC" unuse >/dev/null )
 check "marker removed"            '[ ! -f "$TMP/proj/.ccswitch" ]'
