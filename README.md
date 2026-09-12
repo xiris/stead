@@ -99,9 +99,15 @@ never modified.
 on Linux in CI, so it should work there. I run it on macOS only, so Linux is tested rather than
 used.
 
-**Work outside an interactive shell.** The wrapper is a shell function from your `~/.zshrc`. A
-`claude` launched by an IDE extension or a cron job may not get it, and would run on your default
-account. Check with `whence -w claude`, which should say `function`.
+**Govern what it did not launch.** The wrapper is a shell function from your `~/.zshrc`, so it only
+covers what your shell starts. An IDE extension, a cron job, and Claude Code's own daemon all start
+sessions without it, and those run on your default account even inside a bound directory. I hit this
+in my own client repo: a background session sitting in a bound project forty minutes after binding
+it, on the wrong account, because the daemon lives in `~/.claude` and never saw the marker.
+
+`stead doctor` reports any session whose directory is bound to a profile it is not running under,
+which is the most it can do. Restarting that session from a shell fixes it. Check your own shell
+with `whence -w claude`, which should say `function`.
 
 ## Prior art
 

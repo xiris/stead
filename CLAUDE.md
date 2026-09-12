@@ -20,7 +20,7 @@ The stack's `standards/biome.json` does **not** apply here. It's a shell project
 
 ```bash
 bash -n bin/stead && bash -n test.sh   # syntax
-./test.sh                                 # 162 assertions, must print "0 failed"
+./test.sh                                 # 167 assertions, must print "0 failed"
 shellcheck bin/stead test.sh hooks/*      # must be clean; CI runs it too
 ./hooks/pre-commit                        # all of the above in one gate
 ```
@@ -61,6 +61,13 @@ without passing pre-commit. All three failure modes are proven to exit non-zero,
 - `README.md` - install, the commands, and why the alternatives were rejected
 
 ## Gotchas
+
+- **A login can create a keychain entry but not replace one.** If an entry already exists for a
+  profile's path, `/login` appears to succeed and the next start asks again, forever. Delete the
+  entry first, then log in. This is what made the ccswitch to stead rename look unfixable.
+- **stead only governs what the shell launches.** Claude Code's daemon spawns background and
+  continued sessions with its own config dir, so they run in a bound directory on the DEFAULT
+  account. `wrong_account_sessions` reports them; nothing can prevent them.
 
 - **Moving `$STEAD_HOME` strands every login, and the stale entry then shadows the new one.**
   Claude Code keys the keychain entry on `sha256(config dir)[:8]`. After a move each profile has

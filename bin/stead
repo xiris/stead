@@ -496,6 +496,28 @@ needs_login() {
 	return 0
 }
 
+# The shell wrapper only governs what your shell launches. Anything Claude Code starts for itself -
+# the daemon, a background session, a continued one - inherits the daemon's config dir instead of the
+# directory's binding, so it runs in a bound repo on the DEFAULT account. That is the exact failure
+# this tool exists to prevent, and the tool cannot prevent it. It can refuse to be quiet about it.
+#
+# Prints one line per session whose account does not match the directory it is sitting in.
+wrong_account_sessions() {
+	local pid cwd prof cfg want
+	command -v lsof >/dev/null 2>&1 || return 0
+	for pid in $(pgrep -x claude 2>/dev/null || true); do
+		cwd=$(lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -1)
+		[ -n "$cwd" ] && [ -d "$cwd" ] || continue
+		prof=$( cd "$cwd" 2>/dev/null && resolve 2>/dev/null ) || continue
+		[ -n "$prof" ] || continue
+		want="$PROFILES/$prof/claude"
+		cfg=$(ps eww -o command= -p "$pid" 2>/dev/null | tr ' ' '\n' | sed -n 's/^CLAUDE_CONFIG_DIR=//p' | head -1)
+		[ "$cfg" = "$want" ] && continue
+		printf 'pid %s in %s should be on profile %s but is on %s\n' \
+			"$pid" "$cwd" "$prof" "${cfg:-your DEFAULT account}"
+	done
+}
+
 cmd_version() {
 	printf 'stead %s\n' "$VERSION"
 	printf '  bash     %s\n' "${BASH_VERSION:-unknown}"
@@ -506,7 +528,7 @@ cmd_version() {
 }
 
 cmd_doctor() {
-	local name label src dst broken=0 flagged=0 mcpbad stale
+	local name label src dst broken=0 flagged=0 mcpbad stale wrong
 	[ -d "$PROFILES" ] || { echo "No profiles yet."; return 0; }
 	while IFS= read -r name; do
 		while IFS=$'\t' read -r label src dst; do
@@ -534,6 +556,14 @@ cmd_doctor() {
 			flagged=$((flagged + $(printf '%s\n' "$mcpbad" | wc -l | tr -d ' ')))
 		fi
 	done < <(profile_names)
+	wrong=$(wrong_account_sessions)
+	if [ -n "$wrong" ]; then
+		printf '%s\n' "$wrong" | while IFS= read -r line; do
+			printf '%s\n' "$line"
+			printf '    stead did not launch it, so it never saw the binding. Restart it from a shell.\n'
+		done
+		flagged=$((flagged + $(printf '%s\n' "$wrong" | wc -l | tr -d ' ')))
+	fi
 	if [ "$broken" -eq 0 ] && [ "$flagged" -eq 0 ]; then
 		echo "All profiles share config correctly."
 		return 0

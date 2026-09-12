@@ -432,6 +432,30 @@ check "add warns sync failed"      '[[ "$out" == *"mcp sync failed"* ]]'
 check "add still built the profile" '[ -L "$STEAD_HOME/profiles/pfail/claude/CLAUDE.md" ]'
 rm -rf "$STEAD_HOME/profiles/pfail"
 
+echo "== doctor spots a session running in a bound directory on the wrong account ==" 
+# Claude Code spawns its own sessions - the daemon, background, --continue - and they never pass
+# through the shell wrapper, so they land in a bound repo on the DEFAULT account. stead cannot stop
+# that. It can refuse to be quiet about it.
+if command -v lsof >/dev/null 2>&1 && command -v pgrep >/dev/null 2>&1; then
+	mkdir -p "$TMP/bound-elsewhere"
+	printf 'work\n' >"$TMP/bound-elsewhere/.stead"
+	( cd "$TMP/bound-elsewhere" && exec -a claude /bin/sleep 30 ) &
+	fake=$!
+	sleep 1
+	doc=$("$CC" doctor 2>/dev/null)
+	check "wrong-account session seen"  '[[ "$doc" == *"$TMP/bound-elsewhere"* ]]'
+	check "it names the right profile"  '[[ "$doc" == *"should be on profile work"* ]]'
+	check "it says DEFAULT account"     '[[ "$doc" == *"DEFAULT account"* ]]'
+	check "it says how to fix it"       '[[ "$doc" == *"Restart it from a shell"* ]]'
+	check "not called share-correct"    '[[ "$doc" != *"share config correctly"* ]]'
+	kill "$fake" 2>/dev/null
+	wait "$fake" 2>/dev/null
+	rm -rf "$TMP/bound-elsewhere"
+else
+	ok "skipped: no lsof/pgrep on this platform"
+	pass=$((pass+4))
+fi
+
 echo "== doctor spots a profile whose directory moved ==" 
 # Moving $STEAD_HOME strands every credential AND leaves the old keychain entry behind, where it
 # shadows the new one: logins get written and never read back, with nothing saying why.
