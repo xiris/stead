@@ -107,6 +107,19 @@ check "CODEX_HOME set"            '[ "$(echo "$got" | cut -d"|" -f2)" = "$CCSWIT
 check "profile name exported"     '[ "$(echo "$got" | cut -d"|" -f3)" = "work" ]'
 check "run refuses unknown"       '! "$CC" run ghost sh -c true >/dev/null 2>&1'
 
+# A bound session must not publish its directory name into the shared peer registry.
+mkdir -p "$TMP/acme-secret-client"
+alias1=$(cd "$TMP/acme-secret-client" && "$CC" run work sh -c 'printf %s "$CLAUDE_CODE_SESSION_NAME"')
+check "session alias is set"      '[ -n "$alias1" ]'
+check "alias starts with profile" '[[ "$alias1" == work-* ]]'
+check "alias hides the directory" '[[ "$alias1" != *acme* ]]'
+alias2=$(cd "$TMP/acme-secret-client" && "$CC" run work sh -c 'printf %s "$CLAUDE_CODE_SESSION_NAME"')
+check "alias is stable per dir"   '[ "$alias1" = "$alias2" ]'
+alias3=$(cd "$TMP/elsewhere" && "$CC" run work sh -c 'printf %s "$CLAUDE_CODE_SESSION_NAME"')
+check "alias differs per dir"     '[ "$alias1" != "$alias3" ]'
+alias4=$(cd "$TMP/acme-secret-client" && CLAUDE_CODE_SESSION_NAME=chosen "$CC" run work sh -c 'printf %s "$CLAUDE_CODE_SESSION_NAME"')
+check "explicit name wins"        '[ "$alias4" = "chosen" ]'
+
 echo "== two profiles are actually independent =="
 "$CC" add client >/dev/null
 a=$("$CC" run work   sh -c 'echo $CLAUDE_CONFIG_DIR')

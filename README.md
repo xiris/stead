@@ -52,8 +52,12 @@ under a different profile. Claude Code discovers peers by reading `sessions/` in
 so an unshared one makes two accounts invisible to each other even though the socket they would talk
 over is already global. Sharing it opens no new read channel - profiles isolate accounts, not the
 filesystem - but it does let message *content* cross between accounts, so keep messages task-shaped.
-A session's default name is derived from its directory, so name client sessions yourself if the
-directory name is the thing you would rather not publish to your other accounts.
+A session's default name is derived from its directory, which would publish a client repo's name to
+every other profile at startup - before `/title` could rename it. So a bound directory gets a
+neutral alias instead, `<profile>-<number>`, stable for that profile and directory and carrying
+nothing about either. Set `CLAUDE_CODE_SESSION_NAME` yourself to override it, or `/title` to rename
+a running session. The record's `cwd` field is untouched: this fixes the address book, not the
+record, and that path was already readable from any profile.
 
 Sharing cuts both ways on one file. `settings.local.json` is what Claude Code writes when you pick
 "don't ask again", so a permission you approve under the client account is approved under your

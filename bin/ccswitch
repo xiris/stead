@@ -390,8 +390,19 @@ cmd_run() {
 	require_profile "$name"
 	shift
 	[ $# -gt 0 ] || die "usage: ccswitch run <profile> <command> [args...]"
+	# A session registers itself into the SHARED peer registry at startup, and its default name is
+	# derived from the directory - so a client repo publishes its own name to every other profile
+	# before anyone can rename it, and /title is a cure rather than a prevention. Bound directories
+	# get a neutral, stable alias instead: same profile and directory always produce the same one,
+	# with no state file. An explicit CLAUDE_CODE_SESSION_NAME always wins, and /title still works.
+	# The record's cwd field is untouched - this fixes the address book, not the record.
+	local alias=${CLAUDE_CODE_SESSION_NAME:-}
+	if [ -z "$alias" ]; then
+		alias="$name-$(( $(printf '%s' "$PWD" | cksum | cut -d' ' -f1) % 10000 ))"
+	fi
 	CLAUDE_CONFIG_DIR="$PROFILES/$name/claude" \
 	CODEX_HOME="$PROFILES/$name/codex" \
+	CLAUDE_CODE_SESSION_NAME="$alias" \
 	CCSWITCH_PROFILE="$name" \
 		exec "$@"
 }
