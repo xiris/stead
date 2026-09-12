@@ -90,14 +90,19 @@ filter, not a proof: if a server's definition holds something sensitive, add it 
 
 ## Why not the existing tools
 
-[CCSwitcher](https://github.com/XueshiQiao/CCSwitcher),
-[claude-account-switcher](https://github.com/Symbioose/claude-account-switcher) and
-[cc-account-switcher](https://github.com/ming86/cc-account-switcher) all overwrite the single
-`Claude Code-credentials` keychain entry and the `oauthAccount` block in `~/.claude.json`.
+[CCSwitcher](https://github.com/XueshiQiao/CCSwitcher) (Swift) swaps the account by writing the
+target token to the `Claude Code-credentials` keychain entry and overwriting the `oauthAccount`
+block in `~/.claude.json`. [claude-account-switcher](https://github.com/Symbioose/claude-account-switcher)
+(Python, MIT) backs each account up under `claude-switcher:{email}` and restores the selected one
+into the same active credential slot, updating `~/.claude.json` with it.
+[cc-account-switcher](https://github.com/ming86/cc-account-switcher) (bash, MIT) keeps credentials
+in the keychain and OAuth state in `~/.claude-switch-backup/`, and was archived by its owner on
+22 February 2026.
 
-That makes per-project impossible by construction. There is one slot, so there is one active
-account for the whole machine, and two terminals cannot hold two accounts. They also mutate
-credential storage, which is a bad place to have a bug. `cc-account-switcher` was archived in
-February 2026.
+Different implementations, one shared shape: a single active slot that gets overwritten. That makes
+per-project impossible by construction - one slot means one account for the whole machine, and two
+terminals cannot hold two accounts. They also mutate credential storage, which is a bad place to
+have a bug. None of the three mentions `CLAUDE_CONFIG_DIR`, and none binds an account to a
+directory.
 
 They solve "which account am I on". This solves "which account does this project use".
