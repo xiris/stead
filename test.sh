@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2016,SC2034
+# SC2016: every assertion is a single-quoted expression that `check` evaluates later. Expanding it
+#         at definition time would compare the values from before the command under test ran.
+# SC2034: the variables those assertions read are invisible to shellcheck for the same reason.
 # Self-check for stead. Runs entirely in a temp dir - never touches ~/.claude or ~/.codex.
 set -uo pipefail
 

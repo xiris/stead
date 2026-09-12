@@ -20,7 +20,7 @@ The stack's `standards/biome.json` does **not** apply here. It's a shell project
 ```bash
 bash -n bin/stead && bash -n test.sh   # syntax
 ./test.sh                                 # 143 assertions, must print "0 failed"
-shellcheck bin/stead test.sh           # optional - not installed on this machine
+shellcheck bin/stead test.sh              # must be clean; CI runs it too
 ```
 
 **Known environment failures:** none. `test.sh` touches nothing outside its `mktemp -d`.

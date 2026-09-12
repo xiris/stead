@@ -173,7 +173,12 @@ merge_into_shared() {
 link_shared() {
 	local label src dst f
 	for f in "${CLAUDE_ONDEMAND[@]}"; do
-		[ -e "$CLAUDE_HOME/$f" ] || mkdir -p -m 700 "$CLAUDE_HOME/$f"
+		if [ ! -e "$CLAUDE_HOME/$f" ]; then
+			# NOT `mkdir -p -m 700`: with -p the mode applies only to the deepest directory, so a
+			# $CLAUDE_HOME that also had to be created would take the umask. chmod the leaf.
+			mkdir -p "$CLAUDE_HOME/$f"
+			chmod 700 "$CLAUDE_HOME/$f"
+		fi
 	done
 	# Process substitution, not a pipe: a piped `while` runs in a subshell and loses what it sets.
 	while IFS=$'\t' read -r label src dst; do link_one "$src" "$dst"; done < <(each_shared "$1")
@@ -200,6 +205,7 @@ except Exception:
 # copy puts a client's token in a personal profile.
 mcp_guard() {   # <sync|audit> <source .claude.json> <profile .claude.json> <profile name>
 	command -v python3 >/dev/null 2>&1 || { warn "python3 not found - skipping mcp guard"; return 0; }
+	# shellcheck disable=SC2016  # the python program is data, not shell to expand
 	python3 -c '
 import json, math, os, re, sys, tempfile
 from collections import Counter
