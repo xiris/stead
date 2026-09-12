@@ -143,6 +143,20 @@ check "doctor spots codex file"   '[[ "$doc" == *"work: codex/config.toml"* ]]'
 check "doctor --fix relinks codex" '[ -L "$CCSWITCH_HOME/profiles/work/codex/config.toml" ]'
 check "codex content restored"    '[ "$(cat "$CCSWITCH_HOME/profiles/work/codex/config.toml")" = "trust=1" ]'
 
+echo "== doctor --fix must not delete what it has no shared copy of ==" 
+# The fake claude home has no 'agents' dir, so nothing was ever linked there. Real content at that
+# path is the user's only copy. A --fix loop that walks entries with no source rm -rf's it and
+# link_shared cannot restore it - silent, unrecoverable, right after doctor said "healthy".
+mkdir -p "$CCSWITCH_HOME/profiles/work/claude/agents"
+echo "my only copy" >"$CCSWITCH_HOME/profiles/work/claude/agents/mine.md"
+check "unshared path reported healthy" '[[ "$("$CC" doctor)" == *"share config correctly"* ]]'
+rm "$CCSWITCH_HOME/profiles/work/claude/settings.json"   # an UNRELATED break sends the user to --fix
+echo '{"clobbered":2}' >"$CCSWITCH_HOME/profiles/work/claude/settings.json"
+"$CC" doctor --fix >/dev/null
+check "unrelated --fix spared the data" '[ "$(cat "$CCSWITCH_HOME/profiles/work/claude/agents/mine.md" 2>/dev/null)" = "my only copy" ]'
+check "--fix still repaired the break"  '[ -L "$CCSWITCH_HOME/profiles/work/claude/settings.json" ]'
+rm -rf "$CCSWITCH_HOME/profiles/work/claude/agents"
+
 echo "== list must not call a fail-closed directory 'unbound' =="
 # rc=2 (refuse) reported as "uses your default account" is the exact lie the tool exists to prevent.
 printf 'work\n' >"$TMP/proj/.ccswitch"

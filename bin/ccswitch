@@ -76,10 +76,21 @@ link_one() {
 
 # Emits every shared link for a profile as "<label>\t<src>\t<dst>". The single source of truth for
 # what is shared: link_shared and doctor both read it, so doctor cannot fall behind the lists again.
+#
+# Entries with no source in the real home are filtered out HERE, not by each consumer. One of those
+# consumers is a `rm -rf` loop: if it sees an entry we never linked (because the source is absent),
+# it deletes whatever the profile has at that path and link_shared cannot put it back, since there
+# is nothing to link to. That is silent, unrecoverable data loss right after doctor called the
+# profile healthy. Filtering at the source is what makes it impossible to forget.
 each_shared() {
 	local name=$1 f
-	for f in "${CLAUDE_SHARED[@]}"; do printf 'claude/%s\t%s\t%s\n' "$f" "$CLAUDE_HOME/$f" "$PROFILES/$name/claude/$f"; done
-	for f in "${CODEX_SHARED[@]}"; do printf 'codex/%s\t%s\t%s\n'  "$f" "$CODEX_REAL/$f"  "$PROFILES/$name/codex/$f"; done
+	for f in "${CLAUDE_SHARED[@]}"; do
+		[ -e "$CLAUDE_HOME/$f" ] && printf 'claude/%s\t%s\t%s\n' "$f" "$CLAUDE_HOME/$f" "$PROFILES/$name/claude/$f"
+	done
+	for f in "${CODEX_SHARED[@]}"; do
+		[ -e "$CODEX_REAL/$f" ] && printf 'codex/%s\t%s\t%s\n' "$f" "$CODEX_REAL/$f" "$PROFILES/$name/codex/$f"
+	done
+	return 0
 }
 
 link_shared() {
@@ -195,7 +206,6 @@ cmd_doctor() {
 	[ -d "$PROFILES" ] || { echo "No profiles yet."; return 0; }
 	for name in $(ls -1 "$PROFILES" 2>/dev/null); do
 		while IFS=$'\t' read -r label src dst; do
-			[ -e "$src" ] || continue
 			if [ ! -L "$dst" ]; then
 				broken=$((broken + 1))
 				printf '%s: %s is %s\n' "$name" "$label" \
